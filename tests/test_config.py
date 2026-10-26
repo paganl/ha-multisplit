@@ -119,6 +119,32 @@ def test_an_inconsistent_overshoot_tolerance_is_rejected_per_room():
     assert "raise the tolerance above 1.5" in problems[0]
 
 
+def test_an_unreachable_away_target_is_rejected():
+    """Clamped silently, a setback looks exactly like a broken schedule.
+
+    This is the conflict in HARVEST §E: a range starting at 18 with an away
+    target of 16 would clamp the setback to 18 and it would never take effect.
+    """
+    with pytest.raises(ConfigError) as caught:
+        load(changed("defaults.policy.setpoint_range", [18.0, 26.0]))
+    assert "away_target" in str(caught.value)
+    assert "never take effect" in str(caught.value)
+
+
+def test_lockouts_that_leave_no_permitted_mode_are_rejected():
+    """Cooling refused below 25 and heating above 24 leaves a dead band."""
+    with pytest.raises(ConfigError) as caught:
+        load(changed("defaults.policy.cool_below", 25.0))
+    assert "no mode would be permitted" in str(caught.value)
+
+
+@pytest.mark.parametrize("path", ["defaults.intent.default_target", "defaults.intent.away_target"])
+def test_a_missing_comfort_target_is_an_error(path):
+    with pytest.raises(ConfigError) as caught:
+        load(without(path))
+    assert path.split(".")[-1] in str(caught.value)
+
+
 def test_a_backwards_setpoint_range_is_rejected():
     with pytest.raises(ConfigError) as caught:
         load(changed("defaults.policy.setpoint_range", [26.0, 15.0]))

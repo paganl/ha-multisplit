@@ -226,14 +226,38 @@ def test_group_b_contention_names_the_losing_room():
     assert "wants cool" in result.room("bedroom").because
 
 
-def test_the_cooling_lockout_from_the_configuration_applies():
-    """22 °C, from the questionnaire, not from a constant in here."""
-    assert CONFIG.group("a").policy.cool_below == 22.0
-    result = run(
+def test_the_outdoor_lockouts_from_the_configuration_apply():
+    """20 °C and 24 °C, from the questionnaire, not from constants in here."""
+    policy = CONFIG.group("a").policy
+    assert (policy.cool_below, policy.heat_above) == (20.0, 24.0)
+
+    too_cold_to_cool = run(
         everyone_at(20.0, living_room=24.0),
         {r.key: 20.0 for r in CONFIG.rooms},
-        outdoor=19.0,
+        outdoor=18.0,
     )
-    assert result.group("a").mode is None
-    assert "locked out" in result.group("a").because
-    assert "locked out" in result.room("living_room").because
+    assert too_cold_to_cool.group("a").mode is None
+    assert "locked out" in too_cold_to_cool.group("a").because
+    assert "locked out" in too_cold_to_cool.room("living_room").because
+
+    too_warm_to_heat = run(
+        everyone_at(20.0, living_room=17.0),
+        {r.key: 20.0 for r in CONFIG.rooms},
+        outdoor=26.0,
+    )
+    assert too_warm_to_heat.group("a").mode is None
+    assert "locked out" in too_warm_to_heat.room("living_room").because
+
+
+def test_between_the_lockouts_both_modes_are_available():
+    """20–24 °C outdoor is the band where arbitration, not weather, decides."""
+    both = constraints_for(CONFIG.group("a").policy, outdoor=22.0)
+    assert both.allowed_modes == frozenset({HEAT, COOL})
+
+
+def test_the_away_setback_is_reachable():
+    """A target outside the setpoint range is clamped and never takes effect."""
+    low, high = CONFIG.group("a").policy.setpoint_range
+    assert low <= CONFIG.intent.away_target <= high
+    assert low <= CONFIG.intent.default_target <= high
+    assert CONFIG.intent.away_target < CONFIG.intent.default_target

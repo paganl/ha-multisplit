@@ -244,6 +244,18 @@ cannot go below no matter what inertia is set to.
 | Away / unoccupied target | 16|
 | Is there a seasonal lock today, or both modes year-round? | |
 
+> **One conflict to resolve.** A setpoint range of 18–26 with an away target
+> of 16 cannot both hold: 16 would be clamped up to 18, and the setback would
+> silently never take effect — which looks exactly like a broken schedule. The
+> questionnaire currently lowers the range to **16–26** so the away target
+> works. Say which you meant: a minimum of 18 with an away target of 18, or
+> the minimum of 16 as it now stands.
+>
+> The lockout pair is consistent: no cooling below 20, no heating above 24, so
+> between 20 and 24 both are available and arbitration decides. The loader
+> rejects the pair if they ever cross and leave an outdoor band where neither
+> mode is permitted.
+
 ---
 
 ## §F The open question

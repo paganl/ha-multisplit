@@ -43,7 +43,6 @@ def test_the_assumed_values_are_the_ones_we_think_they_are():
     _, assumed, _ = build_config.generate(QUESTIONNAIRE, ask=False)
     assert set(assumed) == {
         "min_on_minutes",
-        "heat_above",
         "lockout_hysteresis",
         "deadband",
         "inertia_weight",
@@ -58,7 +57,10 @@ def test_the_harvested_values_are_not_assumptions():
     assert answered["cut_off_offset"] == [[0.0, 1.5]]
     assert answered["rest_minutes"] == [[0.0, 5], [7.0, 15], [13.0, 25]]
     assert answered["resume_deadband"] == 0.5
-    assert answered["cool_below"] == 22.0
+    assert answered["cool_below"] == 20.0
+    assert answered["heat_above"] == 24.0
+    assert answered["default_target"] == 20.0
+    assert answered["away_target"] == 16.0
     assert answered["outdoor_sensor"] == "sensor.openweathermap_temperature"
 
 

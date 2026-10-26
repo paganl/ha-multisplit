@@ -157,16 +157,20 @@ sections:
         type: number_or_null
         unit: °C outdoor
         target: defaults.policy.cool_below
-        answer: 22.0
+        answer: 20.0
 
       - id: heat_above
         ask: Above what outdoor temperature should heating be refused?
-        why: The mirror of the cooling lockout. null disables it.
+        why: >-
+          The mirror of the cooling lockout. null disables it. With cooling
+          refused below 20 and heating refused above 24, the band between them
+          allows both and the arbitration decides; outside it the weather
+          decides. The loader rejects the pair if they ever cross over and
+          leave an outdoor band where neither mode is permitted.
         type: number_or_null
         unit: °C outdoor
         target: defaults.policy.heat_above
-        answer: null
-        assume: null
+        answer: 24.0
 
       - id: lockout_hysteresis
         ask: How far past a lockout must the weather go before it lifts?
@@ -192,11 +196,18 @@ sections:
 
       - id: setpoint_range
         ask: What is the lowest and highest target temperature anyone may set?
-        why: Clamps every target, however it arrives.
+        why: >-
+          Clamps every target, however it arrives -- including the away
+          setback below, which is why the loader refuses a range that would
+          clamp it. NOTE: HARVEST §E says 18/26, but the away target of 16
+          would then be unreachable: it would be clamped to 18 and the setback
+          would silently never take effect. Lowered to 16 here so the away
+          target works. Confirm which of the two is right -- a minimum of 18
+          with an away target of 18, or a minimum of 16 as set here.
         type: pair
         unit: °C
         target: defaults.policy.setpoint_range
-        answer: [15.0, 26.0]
+        answer: [16.0, 26.0]
 
       - id: deadband
         ask: How far from target before a room counts as wanting something?
@@ -220,6 +231,33 @@ sections:
         unit: degrees
         target: defaults.policy.overshoot_tolerance
         answer: 1.5
+
+  - title: Comfort targets
+    note: >-
+      What a room should be when nothing more specific says otherwise. Once
+      schedules are wired in these become the fallback rather than the rule.
+    questions:
+      - id: default_target
+        ask: What should a room aim for when no schedule applies?
+        why: >-
+          The target a room gets in the absence of a schedule entity, an
+          override or an away state. Every room shares it until per-room
+          schedules exist.
+        type: number
+        unit: °C
+        target: defaults.intent.default_target
+        answer: 20.0
+
+      - id: away_target
+        ask: What should a room aim for when the house is unoccupied?
+        why: >-
+          The setback. It must sit inside the setpoint range above, or it is
+          clamped and never takes effect -- the loader checks this, because a
+          clamped setback looks exactly like a broken schedule.
+        type: number
+        unit: °C
+        target: defaults.intent.away_target
+        answer: 16.0
 
   - title: Changeover resistance
     note: >-

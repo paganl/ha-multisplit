@@ -113,12 +113,15 @@ defaults:
     # rather than waiting indefinitely for an outdoor unit that will not
     # deliver it. null disables the lockout.
     # Units: °C outdoor.
-    cool_below: 22.0
+    cool_below: 20.0
     # Above what outdoor temperature should heating be refused?
-    # The mirror of the cooling lockout. null disables it.
+    # The mirror of the cooling lockout. null disables it. With cooling
+    # refused below 20 and heating refused above 24, the band between them
+    # allows both and the arbitration decides; outside it the weather decides.
+    # The loader rejects the pair if they ever cross over and leave an outdoor
+    # band where neither mode is permitted.
     # Units: °C outdoor.
-    # UNMEASURED — assumed; the question was left blank.
-    heat_above: null
+    heat_above: 24.0
     # How far past a lockout must the weather go before it lifts?
     # Without this, an outdoor temperature sitting on the threshold allows and
     # forbids cooling on alternate cycles and the group changes its mind as
@@ -131,9 +134,15 @@ defaults:
     # asking for cooling. `auto` lets the lockouts decide instead.
     season: auto
     # What is the lowest and highest target temperature anyone may set?
-    # Clamps every target, however it arrives.
+    # Clamps every target, however it arrives -- including the away setback
+    # below, which is why the loader refuses a range that would clamp it.
+    # NOTE: HARVEST §E says 18/26, but the away target of 16 would then be
+    # unreachable: it would be clamped to 18 and the setback would silently
+    # never take effect. Lowered to 16 here so the away target works. Confirm
+    # which of the two is right -- a minimum of 18 with an away target of 18,
+    # or a minimum of 16 as set here.
     # Units: °C.
-    setpoint_range: [15.0, 26.0]
+    setpoint_range: [16.0, 26.0]
     # How far from target before a room counts as wanting something?
     # Smaller than the resume band, because this decides whether a room has an
     # opinion at all, not whether its unit should start.
@@ -173,3 +182,21 @@ defaults:
     # Units: weight per hour.
     # UNMEASURED — assumed; the question was left blank.
     aging_rate: 0.5
+  intent:
+    #
+    # === Comfort targets ===
+    #
+    # What a room should be when nothing more specific says otherwise. Once
+    # schedules are wired in these become the fallback rather than the rule.
+    #
+    # What should a room aim for when no schedule applies?
+    # The target a room gets in the absence of a schedule entity, an override
+    # or an away state. Every room shares it until per-room schedules exist.
+    # Units: °C.
+    default_target: 20.0
+    # What should a room aim for when the house is unoccupied?
+    # The setback. It must sit inside the setpoint range above, or it is
+    # clamped and never takes effect -- the loader checks this, because a
+    # clamped setback looks exactly like a broken schedule.
+    # Units: °C.
+    away_target: 16.0

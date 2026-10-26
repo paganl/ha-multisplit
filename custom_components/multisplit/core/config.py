@@ -49,6 +49,20 @@ class RoomSpec:
 
 
 @dataclass(frozen=True)
+class IntentConfig:
+    """Targets used when nothing more specific applies.
+
+    ``away_target`` is a setback, so it is normally below ``default_target``.
+    Both are checked against the setpoint range, because a target outside that
+    range is silently clamped and the setting simply never takes effect --
+    which looks exactly like a bug in the schedule.
+    """
+
+    default_target: float
+    away_target: float
+
+
+@dataclass(frozen=True)
 class GroupSpec:
     key: str
     name: str
@@ -58,6 +72,7 @@ class GroupSpec:
 @dataclass(frozen=True)
 class SystemConfig:
     outdoor_sensor: str
+    intent: IntentConfig
     groups: tuple[GroupSpec, ...]
     rooms: tuple[RoomSpec, ...]
 
@@ -187,9 +202,19 @@ def _policy(reader: _Reader, raw: Mapping, where: str) -> PolicyConfig:
         if low >= high:
             reader.fail(where, f"'setpoint_range' min {low:g} is not below max {high:g}")
 
+    cool_below = reader.optional_number(raw, "cool_below", where)
+    heat_above = reader.optional_number(raw, "heat_above", where)
+    if cool_below is not None and heat_above is not None and cool_below > heat_above:
+        reader.fail(
+            where,
+            f"no mode would be permitted between {heat_above:g}° and "
+            f"{cool_below:g}° outdoor: cooling is locked out below "
+            f"{cool_below:g}° and heating above {heat_above:g}°",
+        )
+
     return PolicyConfig(
-        cool_below=reader.optional_number(raw, "cool_below", where),
-        heat_above=reader.optional_number(raw, "heat_above", where),
+        cool_below=cool_below,
+        heat_above=heat_above,
         lockout_hysteresis=reader.number(raw, "lockout_hysteresis", where),
         season=season or "auto",
         setpoint_range=(low, high),
@@ -224,6 +249,24 @@ def load(raw: object) -> SystemConfig:
         reader.mapping(defaults.get("participation"), "defaults.participation"),
         "defaults.participation",
     )
+
+    raw_intent = reader.mapping(defaults.get("intent"), "defaults.intent")
+    intent = IntentConfig(
+        default_target=reader.number(raw_intent, "default_target", "defaults.intent"),
+        away_target=reader.number(raw_intent, "away_target", "defaults.intent"),
+    )
+    low, high = default_policy.setpoint_range
+    for label, value in (
+        ("default_target", intent.default_target),
+        ("away_target", intent.away_target),
+    ):
+        if not low <= value <= high:
+            reader.fail(
+                "defaults.intent",
+                f"'{label}' of {value:g}° is outside the setpoint range "
+                f"{low:g}–{high:g}°, so it would be silently clamped to "
+                f"{min(max(value, low), high):g}° and never take effect",
+            )
 
     raw_groups = reader.mapping(root.get("groups"), "groups")
     if not raw_groups:
@@ -322,6 +365,7 @@ def load(raw: object) -> SystemConfig:
 
     return SystemConfig(
         outdoor_sensor=outdoor,
+        intent=intent,
         groups=tuple(groups),
         rooms=tuple(rooms),
     )
