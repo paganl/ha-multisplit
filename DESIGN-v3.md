@@ -121,6 +121,18 @@ class Plan:
 produced by the code that made it. Nothing downstream ever has to infer why
 something happened — which is precisely the failure in the current design.
 
+`Plan` also carries `runtime`: the memory for the next cycle. Computing the
+state transitions in the planner rather than the coordinator means the state
+machine — when a dwell timer restarts, when a starvation clock starts and
+stops — is covered by the same pure tests as the decisions, instead of living
+untested in the Home Assistant layer.
+
+The curves are `Curve` objects holding sorted breakpoints with linear
+interpolation, not Python callables. Breakpoints are configurable from the UI,
+serialisable, and clamped rather than extrapolated at the ends — extrapolating
+a measured curve into weather you have never observed is how you find a bug in
+February.
+
 ---
 
 ## 4. The planner
@@ -178,6 +190,32 @@ short-cycling the shared compressor.
 
 This remains a **pure function**: `ParticipationState` and `now` are inputs,
 so there is still no hidden state and it is still unit-testable.
+
+### Two corrections the tests forced into the model
+
+Both were found by writing the scenario table in phase 0, not by reasoning
+about the design. Both are the kind of defect that would have presented in a
+real house as "it thrashes sometimes".
+
+**Structural overshoot must not read as demand for the opposite mode.** If
+comfort demand used one symmetric deadband, a room pushed past its target by
+minimum capacity -- which is guaranteed, by design -- would immediately vote
+for cooling. The hardware's own behaviour would generate changeover pressure
+every cycle, and the system would thrash because of the very effect the
+participation controller exists to absorb. So wanting the opposite of what is
+currently being delivered has to clear a wider band:
+`Constraints.overshoot_tolerance`, which must exceed the cut-off offset plus
+the coast that follows it.
+
+**A running unit is committed, and the group cannot turn off underneath it.**
+Participation keeps a room running until its cut-off, and through its minimum
+run time. But comfort demand reaches zero the moment the room is inside the
+deadband -- so a group scoring purely on comfort would drop to off while a
+unit was still running, undoing the duty cycle on the next tick. Demand is
+therefore `wants or holding`, where `holding` is "running, and either short of
+the cut-off or inside the minimum run". Group mode scores on either;
+starvation counts only unmet `wants`, because only unmet comfort is being
+starved.
 
 Two mechanisms replace four pieces of existing machinery.
 

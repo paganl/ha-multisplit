@@ -10,3 +10,6 @@ venv/
 
 # Editors / local tooling
 *.log
+
+# phase 0 test venv
+.venv/

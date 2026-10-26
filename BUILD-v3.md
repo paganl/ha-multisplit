@@ -195,9 +195,14 @@ until phase 2.
 plus a scenario table in `tests/test_planner.py`: both rooms opposed; one room
 starved for an hour; outdoor exactly at the lockout; sensor stale; a room
 overshooting in mild weather; a room overshooting in cold weather. No Home
-Assistant, no house, milliseconds to run. *(Note: `python3` on this Mac is
-currently broken — Xcode licence unaccepted — so this needs a working Python
-first, locally or on the HA box.)*
+Assistant, no house, milliseconds to run.
+
+**Done.** `core/model.py`, `core/planner.py`, `core/policy.py` and 38 tests,
+green. The pure core lives in `custom_components/multisplit/core/` so it can
+be imported with nothing but the standard library; CI asserts that it never
+imports Home Assistant. Two defects surfaced during the write-up and are
+recorded in DESIGN-v3.md §4. The participation curves are placeholders until
+HARVEST.md §C2 lands.
 
 **Phase 1 — shadow mode.** Integration loads, coordinator ticks, plan is
 published to the status and mode sensors, **reconciler disabled**. The old

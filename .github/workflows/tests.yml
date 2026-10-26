@@ -1,0 +1,29 @@
+name: tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  core:
+    # The decision layer has no dependencies at all -- not even Home
+    # Assistant. If this job ever needs one installed, the boundary that makes
+    # the planner testable has been broken, and that is worth a red build.
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: pip install pytest pyflakes
+      - run: python -m pytest tests/
+      - run: python -m pyflakes custom_components/multisplit/core/ tests/
+      - name: the core must not import Home Assistant
+        run: |
+          if grep -rn "homeassistant" custom_components/multisplit/core/ --include='*.py'; then
+            echo "::error::core/ imported Home Assistant — the decision layer must stay pure"
+            exit 1
+          fi
