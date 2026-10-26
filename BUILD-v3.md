@@ -11,10 +11,24 @@ piece is proved before the next one starts*.
 **One custom integration. No YAML packages, no blueprints, no helper entities.**
 
 Everything in sections 1–7 of the design lives in
-`custom_components/multisplit/`. Configuration is a config flow, not YAML, so
-there is no hand-edited file to drift. Automations disappear entirely — the
+`custom_components/multisplit/`. Automations disappear entirely — the
 coordinator ticks on a timer and the reconciler converges; there is nothing
 left for an automation to trigger.
+
+**Configuration is YAML, and the YAML is generated from a questionnaire.**
+`questionnaire.yaml` is the only file anyone edits: it holds each question in
+the words it was asked, the answer as given, and `why` — what that number
+actually does. `tools/build_config.py` turns the answers into
+`multisplit.yaml` (curves, seconds, nested keys) and carries the question text
+across as comments, so the config explains itself without two documents to
+keep in step. `--ask` walks through whatever is unanswered; `--check` fails if
+the generated file has drifted, which CI runs on every push.
+
+Nothing in the Python holds a threshold, a curve, an entity id or a room name.
+A missing key is an error, not a silent default — a hidden default is
+indistinguishable from a hard-coded value. Where an answer is genuinely
+missing, the questionnaire states an `assume` and the generated line is marked
+UNMEASURED, so assumptions are visible rather than buried.
 
 Three things stay native Home Assistant and are *consumed*, not rebuilt:
 
@@ -69,12 +83,12 @@ state, starts no timers.
 
 | File | Contents |
 | --- | --- |
-| `manifest.json` | `domain: multisplit`, `config_flow: true`, `iot_class: local_polling`, no external deps |
+| `manifest.json` | `domain: multisplit`, `iot_class: local_polling`, no external deps |
 | `__init__.py` | setup/unload, platform forwarding, service registration |
 | `const.py` | domain, defaults, config keys |
-| `config_flow.py` | setup + options flow (section 4 below) |
+| `yaml_config.py` | reads `multisplit.yaml` at the edge; `core/config.py` validates it |
 | `services.yaml` | service schemas (section 3 below) |
-| `strings.json` / `translations/en.json` | config flow and service labels |
+| `strings.json` / `translations/en.json` | service labels |
 
 ---
 
@@ -130,33 +144,35 @@ when it wins. Nothing to request, nothing to approve, nothing to reject.
 
 ---
 
-## 4. What the config flow asks
+## 4. What the questionnaire asks
 
-**Setup**
+Five sections, seventeen questions, in [questionnaire.yaml](questionnaire.yaml).
 
-1. **Outdoor temperature** — pick the entity.
-2. **Groups** — one per outdoor unit, with a name.
-3. **Rooms** — repeatable step: name, `climate.*` entity, temperature
-   sensor(s), group, base priority, optional `schedule.*` entity.
+| Section | Asks about |
+| --- | --- |
+| Outdoor temperature | which entity the lockouts and curves are indexed against |
+| Outdoor units and rooms | the groups, and each room's climate entity, sensors and group |
+| The duty cycle | cut-off, rest period, resume band, minimum run — the measured part |
+| What the system is permitted to do | lockouts, hysteresis, season, setpoint range, deadband, overshoot tolerance |
+| Changeover resistance | inertia weight, its half-life, aging rate |
 
-**Options** (re-editable, which is where tuning lives)
+Ten are answered from HARVEST.md. Seven are still assumptions, and the
+generated config says so on the line:
 
-4. **Policy** — cool lockout below N °C, heat lockout above M °C, setpoint
-   range, deadband.
-5. **Arbitration** — inertia weight, inertia decay time, aging rate.
-6. **Participation, per room** — `min_on`, and a small breakpoint table:
+```
+min_on_minutes, heat_above, lockout_hysteresis, deadband,
+inertia_weight, inertia_half_life_minutes, aging_rate
+```
 
-   | Outdoor °C | Cut-off offset | Min off |
-   | --- | --- | --- |
-   | 0 | +0.3 | 10 min |
-   | 7 | 0.0 | 20 min |
-   | 14 | −0.4 | 35 min |
+A room can override any participation value — HARVEST §C3 asks whether any
+room needed its own numbers, and the loader merges a room's overrides over the
+defaults key by key.
 
-   Interpolated between breakpoints. A table beats a formula here because the
-   numbers are measured, not derived — and because you can change one row when
-   one room misbehaves.
-
----
+One invariant is checked at load time and refuses the configuration outright:
+**the overshoot tolerance must exceed the largest cut-off.** A room parked at
++1.5 °C by the duty cycle must not be read as asking for cooling, or the duty
+cycle and the arbitration are permanently opposed and the compressor pays for
+it. The error names every room affected and the number to change.
 
 ## 5. What gets deleted — and what must be harvested first
 
@@ -175,7 +191,7 @@ Delete:
 not code, and cannot be re-derived:
 
 1. **Group membership** — which room is on which outdoor unit. Lives only in
-   the blueprint today. → config flow.
+   the blueprint today. → `questionnaire.yaml`, rooms section.
 2. **The participation thresholds and timers**, including how they vary with
    outdoor temperature. Measured in the building. → the breakpoint table.
 3. **The hysteresis and minimum-runtime values** — not reused directly, but

@@ -179,14 +179,22 @@ heating, room currently standing by:
 cooling: mirrored.
 ```
 
-`cut_off_offset` **may be negative** — in mild weather the correct action is
-to stop before the room reaches target, because minimum capacity plus the
-residual heat in the coil will carry it past anyway. That is anticipatory
-cut-off, and it is the part a fixed threshold cannot express.
+`cut_off_offset` **may be negative** — in mild weather, stopping before the
+room reaches target is expressible, because minimum capacity plus the residual
+heat in the coil will carry it past anyway. The model allows it, but note that
+this was my inference and **the field data does not support it**: the measured
+cut-off (HARVEST.md §C) is a constant 1.5 °C with no outdoor dependence at
+all. Anticipatory cut-off remains available if measurement ever justifies it;
+it is not currently in use.
 
-`min_off` widens in mild weather too: a room that has been overshot coasts
-for longer before it genuinely needs heat again, and resting the unit avoids
-short-cycling the shared compressor.
+`min_off` widens in mild weather, and this part the field data confirms
+directly: 5 minutes of rest at 0 °C, 15 at 7 °C, 25 in the shoulder season. A
+room that has been overshot coasts for longer before it genuinely needs heat
+again, and resting the unit avoids short-cycling the shared compressor.
+
+So of the two curves, **the rest period is the one that varies.** Both are
+modelled as curves regardless, because that costs nothing and the alternative
+is a schema change the day a measurement disagrees.
 
 This remains a **pure function**: `ParticipationState` and `now` are inputs,
 so there is still no hidden state and it is still unit-testable.
@@ -266,21 +274,37 @@ Properties that matter:
 
 ```
 custom_components/multisplit/
-    model.py          dataclasses above — no HA imports
-    planner.py        pure decision logic — no HA imports  ← the testable heart
-    policy.py         Constraints from config + outdoor temperature
+    core/model.py     dataclasses above — stdlib only
+    core/planner.py   pure decision logic — stdlib only  ← the testable heart
+    core/policy.py    Constraints from config + outdoor temperature
+    core/config.py    validated mapping → model; no YAML library, no HA
+    yaml_config.py    reads multisplit.yaml — the only use of a YAML parser
     intent.py         schedule / override / presence resolution
     measurement.py    sensor selection, averaging, staleness
     reconciler.py     the only writer
     coordinator.py    gathers inputs, calls planner, hands plan to reconciler
     climate.py        one entity per room
     sensor.py         status + reason per room; mode + reason per group
-    config_flow.py    groups, rooms, entity mapping — UI, not YAML
     services.yaml     set_room_target, set_season, clear_override
 ```
 
-`planner.py` and `model.py` importing nothing from Home Assistant is the
-single most valuable constraint in this document. The entire decision layer
+Everything under `core/` lives one level down from the integration package so
+it imports with nothing but the standard library, and CI fails the build if
+anything in there ever imports Home Assistant.
+
+**Configuration is YAML, generated from a questionnaire.** `questionnaire.yaml`
+holds the questions as they were asked, the answers as they were given, and
+what each number does; `tools/build_config.py` turns that into
+`multisplit.yaml`, which is what the integration reads. No threshold, curve,
+entity id or room name appears in the Python at all. A missing key is an error
+rather than a silent default, because a hidden default is indistinguishable
+from a hard-coded value — you cannot see it, cannot change it from the config,
+and it surfaces later as mysterious behaviour. Values that are assumptions
+rather than measurements are marked UNMEASURED in the generated file, so the
+ones worth revisiting are visible on the page.
+
+`core/planner.py` and `core/model.py` importing nothing from Home Assistant is
+the single most valuable constraint in this document. The entire decision layer
 can be unit-tested in milliseconds, including every scenario that is painful
 to reproduce in a live house: both rooms opposed, sensor stale, outdoor at
 the lockout boundary, a room starved for an hour.

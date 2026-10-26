@@ -18,9 +18,11 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
-      - run: pip install pytest pyflakes
+      - run: pip install pytest pyflakes pyyaml
       - run: python -m pytest tests/
-      - run: python -m pyflakes custom_components/multisplit/core/ tests/
+      - run: python -m pyflakes custom_components/multisplit/ tests/ tools/
+      - name: multisplit.yaml must match questionnaire.yaml
+        run: python tools/build_config.py --check
       - name: the core must not import Home Assistant
         run: |
           if grep -rn "homeassistant" custom_components/multisplit/core/ --include='*.py'; then

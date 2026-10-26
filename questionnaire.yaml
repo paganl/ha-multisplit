@@ -1,0 +1,262 @@
+# The questionnaire. Fill this in; multisplit.yaml is generated from it.
+#
+#   python3 tools/build_config.py            # regenerate multisplit.yaml
+#   python3 tools/build_config.py --ask      # walk through what is unanswered
+#   python3 tools/build_config.py --check    # fail if the YAML has drifted
+#
+# Why a questionnaire rather than editing the config directly: the config
+# needs curves, seconds and entity ids; a person has answers like "it
+# overshot by about a degree and a half, so I powered it off". This file holds
+# the questions in the words they were asked, the answers as given, and
+# `why` -- what the number does, so the next person to tune it knows what
+# they are changing.
+#
+# `answer: null` means unanswered. An unanswered question with an `assume`
+# falls back to that value and is marked UNMEASURED in the generated file; an
+# unanswered question without one is an error.
+
+version: 1
+
+sections:
+  - title: Outdoor temperature
+    questions:
+      - id: outdoor_sensor
+        ask: Which entity reports the outdoor temperature?
+        why: >-
+          Every lockout and every participation curve is indexed against this
+          entity, so the curves are only valid while it stays the same one. A
+          weather service is usually better than the outdoor unit's own
+          sensor, which sits in a sun-trap often enough to read several
+          degrees off.
+        type: entity
+        domain: sensor
+        target: outdoor_sensor
+        answer: sensor.openweathermap_temperature
+
+  - title: Outdoor units and rooms
+    questions:
+      - id: groups
+        ask: What are the outdoor units, and what should each be called?
+        why: >-
+          One group per outdoor unit. Rooms on the same outdoor unit cannot
+          heat and cool at the same time -- that constraint is the whole
+          reason this system exists.
+        type: records
+        target: groups
+        key_field: key
+        answer:
+          - key: a
+            name: Group A
+          - key: b
+            name: Group B
+
+      - id: rooms
+        ask: Which rooms are on which outdoor unit, and what does each talk to?
+        why: >-
+          `temperature_sensors` is in preference order; the first reading that
+          is not stale wins. An empty list falls back to the indoor unit's own
+          sensor, which sits in the return air path and reads warm while
+          heating -- it measures the unit, not the room, so every threshold
+          inherits that bias.
+        type: records
+        target: rooms
+        key_field: key
+        answer:
+          - key: living_room
+            name: Living Room
+            group: a
+            climate_entity: climate.mitsubishi_ac_livingroom_mitsubishi_ac_livingroom_climate
+            temperature_sensors: [sensor.average_living_room_temperature]
+          - key: ischa
+            name: Ischa's Bedroom
+            group: a
+            # Ends in "climat", not "climate" -- confirm in Developer Tools → States.
+            climate_entity: climate.mitsubishi_ac_ischa_mitsubishi_ac_ischa_climat
+            temperature_sensors: []
+          - key: bedroom
+            name: Bedroom
+            group: b
+            climate_entity: climate.mitsubishi_ac_bedroom_mitsubishi_ac_bedroom_climate
+            temperature_sensors: []
+          - key: erin
+            name: Erin's Bedroom
+            group: b
+            climate_entity: climate.mitsubishi_ac_erin_mitsubishi_ac_erin_climate
+            temperature_sensors: []
+          - key: office
+            name: Office
+            group: b
+            climate_entity: climate.mitsubishi_ac_office_mitsubishi_ac_office_climate
+            temperature_sensors: []
+
+  - title: The duty cycle
+    note: >-
+      Measured in the building (HARVEST.md §C). These are the numbers the
+      design could not have derived: an indoor unit cannot modulate below its
+      minimum capacity, and the compressor speed is set by whichever room is
+      working hardest, so a nearly-satisfied room overshoots by design.
+    questions:
+      - id: cut_off_offset
+        ask: How far past target did you let a room go before powering the unit off?
+        why: >-
+          The overshoot the duty cycle deliberately tolerates. Measured as a
+          constant here -- it did not vary with outdoor temperature. Entered
+          as a curve of [outdoor °C, degrees past target] so it can vary later
+          if a measurement ever says it should; one point is a flat line.
+        type: curve
+        unit: degrees past target
+        target: defaults.participation.cut_off_offset
+        answer:
+          - [0.0, 1.5]
+
+      - id: rest_minutes
+        ask: How long did you leave the unit off, and did that depend on the weather?
+        why: >-
+          This is the part that varied. An overshot room coasts for longer in
+          mild weather, so resting it longer both avoids re-heating a room
+          that is still drifting down and keeps clear of the compressor's own
+          anti-cycle lockout.
+        type: curve
+        unit: minutes of rest
+        target: defaults.participation.rest_minutes
+        answer:
+          - [0.0, 5]
+          - [7.0, 15]
+          - [13.0, 25]
+
+      - id: resume_deadband
+        ask: How far below target before the unit was allowed to restart?
+        why: >-
+          Wider than the demand deadband, so a room does not restart the
+          moment it drifts a fraction below target.
+        type: number
+        unit: degrees below target
+        target: defaults.participation.resume_deadband
+        answer: 0.5
+
+      - id: min_on_minutes
+        ask: Once running, how long must a unit stay on before it may be stopped?
+        why: >-
+          Anti short-cycle protection, and the reason a room already running
+          keeps its group in its mode: it cannot stop yet, so the group must
+          not change mode out from under it.
+        type: number
+        unit: minutes
+        target: defaults.participation.min_on_minutes
+        answer: null
+        assume: 5
+
+  - title: What the system is permitted to do
+    questions:
+      - id: cool_below
+        ask: Below what outdoor temperature should cooling be refused?
+        why: >-
+          A cooling request below this is rejected immediately with a reason,
+          rather than waiting indefinitely for an outdoor unit that will not
+          deliver it. null disables the lockout.
+        type: number_or_null
+        unit: °C outdoor
+        target: defaults.policy.cool_below
+        answer: 22.0
+
+      - id: heat_above
+        ask: Above what outdoor temperature should heating be refused?
+        why: The mirror of the cooling lockout. null disables it.
+        type: number_or_null
+        unit: °C outdoor
+        target: defaults.policy.heat_above
+        answer: null
+        assume: null
+
+      - id: lockout_hysteresis
+        ask: How far past a lockout must the weather go before it lifts?
+        why: >-
+          Without this, an outdoor temperature sitting on the threshold allows
+          and forbids cooling on alternate cycles and the group changes its
+          mind as fast as the sensor noise.
+        type: number
+        unit: degrees
+        target: defaults.policy.lockout_hysteresis
+        answer: null
+        assume: 1.0
+
+      - id: season
+        ask: Should the system be locked to one season, or decide for itself?
+        why: >-
+          A seasonal lock is a cheap way to stop a sunny February afternoon
+          from asking for cooling. `auto` lets the lockouts decide instead.
+        type: choice
+        options: [heat, cool, auto]
+        target: defaults.policy.season
+        answer: auto
+
+      - id: setpoint_range
+        ask: What is the lowest and highest target temperature anyone may set?
+        why: Clamps every target, however it arrives.
+        type: pair
+        unit: °C
+        target: defaults.policy.setpoint_range
+        answer: [15.0, 26.0]
+
+      - id: deadband
+        ask: How far from target before a room counts as wanting something?
+        why: >-
+          Smaller than the resume band, because this decides whether a room
+          has an opinion at all, not whether its unit should start.
+        type: number
+        unit: degrees
+        target: defaults.policy.deadband
+        answer: null
+        assume: 0.3
+
+      - id: overshoot_tolerance
+        ask: How far past target may a room sit before it counts as wanting the opposite mode?
+        why: >-
+          Must exceed the cut-off above. A room parked at +1.5 by the duty
+          cycle must not be read as asking for cooling, or the two controllers
+          are permanently opposed and the compressor pays for it. Checked at
+          load time against every room's cut-off.
+        type: number
+        unit: degrees
+        target: defaults.policy.overshoot_tolerance
+        answer: 1.5
+
+  - title: Changeover resistance
+    note: >-
+      Replaces the hysteresis blueprint, the minimum mode runtime and the vote
+      thresholds with one decaying bonus. HARVEST.md §D holds the old values,
+      which are the evidence for what to put here.
+    questions:
+      - id: inertia_weight
+        ask: How strongly should the group resist changing mode?
+        why: >-
+          A score bonus for staying put. Too low and it churns; too high and
+          it is slow to respond to a genuine need. Unlike a hard minimum
+          runtime it only biases the decision -- the system is never forbidden
+          from responding.
+        type: number
+        target: defaults.policy.inertia_weight
+        answer: null
+        assume: 2.0
+
+      - id: inertia_half_life_minutes
+        ask: How quickly should that resistance fade?
+        why: The bonus halves every interval, so sustained demand eventually wins.
+        type: number
+        unit: minutes
+        target: defaults.policy.inertia_half_life_minutes
+        answer: null
+        assume: 20
+
+      - id: aging_rate
+        ask: How fast should an unserved room gain priority?
+        why: >-
+          Extra weight per hour a room's demand goes unmet. This is what makes
+          starvation impossible by construction and replaces the request and
+          approve protocol: a genuinely starved room wins eventually, with
+          nobody pressing a button.
+        type: number
+        unit: weight per hour
+        target: defaults.policy.aging_rate
+        answer: null
+        assume: 0.5

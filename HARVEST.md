@@ -69,14 +69,35 @@ unless a room genuinely matters more than the others.
 Where a room has more than one candidate sensor, list them in preference
 order — `measurement.py` takes the first one that isn't stale.
 
+> **Two things to settle from the table above.**
+>
+> 1. **Four of the five rooms have no dedicated temperature sensor**, so they
+>    would fall back to the indoor unit's own reading. That sensor sits in the
+>    return air path, which reads warm while heating and cool while cooling —
+>    it measures the unit, not the room. Every threshold in §C is relative to
+>    *some* temperature, and if four rooms use a biased one the duty cycle
+>    inherits that bias. Worth checking whether a room sensor exists under
+>    another name before accepting the fallback.
+> 2. `climate.mitsubishi_ac_ischa_mitsubishi_ac_ischa_climat` ends in
+>    `climat`, where the other four end in `climate`. Probably a typo, but it
+>    could be a genuinely truncated entity id — worth pasting from Developer
+>    Tools → States rather than assuming either way.
+
 **Outdoor temperature source:** `sensor.openweathermap_temperature`
 
-Is that a real outdoor sensor, the outdoor unit's own reading, or a
-`weather.*` forecast entity? It matters: the unit's own sensor sits in a
-sun-trap or against a warm wall often enough that it reads several degrees off,
-and the participation curves in §C are indexed against *this* entity, whatever
-it is. If it's wrong, the curves are wrong with it, consistently — which is
-survivable, but only if it's the same entity afterwards.
+A weather service rather than a local sensor. On balance that is the better
+choice here: it is immune to the sun-trap and warm-wall errors that make an
+outdoor unit's own sensor read several degrees off, and it is consistent, which
+is what the §C curves need since they are indexed against it. Two consequences
+worth knowing:
+
+- It is a regional observation, so it lags real conditions at the house and can
+  be a degree or two out on a still, sunny day. The curves absorb that, because
+  they were tuned against this same entity.
+- It can go unavailable when the API call fails. `policy.py` handles an unknown
+  outdoor temperature explicitly: lockouts are not applied, the reason says so,
+  and the participation curves fall back to their coldest breakpoint — the
+  cautious end, meaning the shortest rest.
 
 ---
 
@@ -135,9 +156,23 @@ temperature". This is the part worth the most care.
 
 | Outdoor temperature | Cut-off offset | Rest period | Notes |
 | --- | --- | --- | --- |
-| Cold (around 0 °C) |5 | | |
-| Mild (around 7 °C) | 15| | |
-| Shoulder (around 12–14 °C) |25 | | |
+| Cold (around 0 °C) | 1.5 (constant) | 5 min | |
+| Mild (around 7 °C) | 1.5 (constant) | 15 min | |
+| Shoulder (around 12–14 °C) | 1.5 (constant) | 25 min | |
+
+> **Re-read, needs confirming.** The numbers 5 / 15 / 25 were entered in the
+> cut-off column but have been taken as **minutes of rest period**, because:
+> five to twenty-five *degrees* past target is not physical; §C1 already gives
+> a single cut-off of 1.5 °C with no outdoor dependence; and the original
+> description was "powered the unit off after a period of time ... based on
+> external factors like outside temperature" — it is the *period off* that is
+> both time-based and outdoor-dependent. Rising rest with rising outdoor
+> temperature also matches the physics: an overshot room coasts for longer in
+> mild weather.
+>
+> So the mechanism is read as: **fixed 1.5 °C overshoot, variable rest.** If
+> that is wrong, say so — it is the single most load-bearing assumption in the
+> calibration, and it is encoded in `core/measured.py`.
 
 If it was a formula rather than a table, write the formula. If it was a single
 threshold with a separate outdoor-temperature *condition* gating it (below X,
@@ -236,10 +271,11 @@ mornings" is enough to go looking.
 
 | From | Becomes |
 | --- | --- |
-| §A rooms and sensors | config flow, rooms step |
-| §A outdoor source | config flow, setup step; `policy.py` input |
-| §B group membership | config flow, groups step |
-| §C1 / §C2 / §C3 | per-room participation breakpoint table in the options flow |
+| §A rooms and sensors | `questionnaire.yaml` → rooms |
+| §A outdoor source | `questionnaire.yaml` → outdoor_sensor; `policy.py` input |
+| §B group membership | `questionnaire.yaml` → rooms (each room's group) |
+| §C1 / §C2 | `questionnaire.yaml` → defaults.participation |
+| §C3 | a per-room `participation:` override in `questionnaire.yaml` |
 | §C4 | a scenario in `tests/test_planner.py` |
 | §D | starting value for inertia weight and decay |
 | §E | `Constraints` in `policy.py` |

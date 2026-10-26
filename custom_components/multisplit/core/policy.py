@@ -10,7 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import timedelta
 
-from .model import COOL, HEAT, MODES, Constraints
+from .model import COOL, HEAT, MODES, Constraints, ParticipationPolicy
 
 SEASON_AUTO = "auto"
 
@@ -28,6 +28,12 @@ class PolicyConfig:
 
     setpoint_range: tuple[float, float] = (15.0, 26.0)
     deadband: float = 0.3
+
+    #: Default taken from the measured cut-off (HARVEST.md §C1): a room is
+    #: parked at +1.5° by the duty cycle, so it must not start asking for
+    #: cooling before it has cleared that. ``participation_problems`` checks
+    #: the pair, because getting this wrong makes the two controllers fight.
+    overshoot_tolerance: float = 1.5
 
     inertia_weight: float = 2.0
     inertia_half_life: timedelta = timedelta(minutes=20)
@@ -126,8 +132,57 @@ def _build(
         allowed_modes=frozenset(allowed),
         setpoint_range=config.setpoint_range,
         deadband=config.deadband,
+        overshoot_tolerance=config.overshoot_tolerance,
         inertia_weight=config.inertia_weight,
         inertia_half_life=config.inertia_half_life,
         aging_rate=config.aging_rate,
         reasons=merged,
     )
+
+
+def participation_problems(
+    policy: ParticipationPolicy, constraints: Constraints
+) -> list[str]:
+    """Invariants a room's duty cycle has to satisfy to be self-consistent.
+
+    The important one is not obvious and is easy to get wrong by hand: the
+    overshoot a room is *permitted* to sit in must be smaller than the
+    overshoot at which it starts *asking for cooling*. Otherwise the duty
+    cycle parks the room in a state that reads as demand for the opposite
+    mode, and the two controllers fight -- every cycle, by construction.
+
+    Returned as a list so the config flow can refuse the combination and say
+    which number to change, instead of accepting it and thrashing the
+    compressor in February.
+    """
+    problems: list[str] = []
+
+    worst_cut_off = max(y for _, y in policy.cut_off_offset.points)
+    resume = (
+        constraints.deadband
+        if policy.resume_deadband is None
+        else policy.resume_deadband
+    )
+    asks_for_opposite_at = constraints.deadband + constraints.overshoot_tolerance
+
+    if worst_cut_off >= asks_for_opposite_at:
+        problems.append(
+            f"a room is allowed to overshoot by {worst_cut_off:g}° but starts "
+            f"asking for the opposite mode at {asks_for_opposite_at:g}° "
+            f"(deadband {constraints.deadband:g}° + tolerance "
+            f"{constraints.overshoot_tolerance:g}°); raise the tolerance above "
+            f"{worst_cut_off:g}°"
+        )
+
+    if resume > worst_cut_off + max(0.0, constraints.deadband):
+        problems.append(
+            f"the resume band of {resume:g}° is wider than the cut-off of "
+            f"{worst_cut_off:g}°, so a room would have to cool further than it "
+            f"was ever heated before it restarts"
+        )
+
+    shortest_rest = min(y for _, y in policy.min_off.points)
+    if shortest_rest <= 0:
+        problems.append("the rest period must be positive, or the unit will short-cycle")
+
+    return problems
