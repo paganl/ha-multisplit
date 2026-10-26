@@ -1,0 +1,280 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>multisplit-climate-card harness</title>
+<style>
+  body {
+    font: 14px -apple-system, system-ui, sans-serif;
+    background: #f2f4f7;
+    margin: 0;
+    padding: 20px;
+    display: flex;
+    gap: 24px;
+    align-items: flex-start;
+    --primary-text-color: #212121;
+    --secondary-text-color: #727272;
+    --divider-color: #e0e0e0;
+    --primary-color: #03a9f4;
+    --card-background-color: #fff;
+    --secondary-background-color: #e8eaed;
+    --disabled-color: #bdbdbd;
+    --error-color: #db4437;
+  }
+  ha-card {
+    display: block;
+    background: var(--card-background-color);
+    border-radius: 12px;
+    box-shadow: 0 2px 6px rgba(0,0,0,.12);
+  }
+  #card { width: 360px; }
+  #panel { width: 440px; }
+  pre {
+    background: #111;
+    color: #0f0;
+    padding: 10px;
+    border-radius: 8px;
+    height: 300px;
+    overflow: auto;
+    font-size: 12px;
+    margin: 8px 0;
+  }
+  button { font: inherit; margin: 2px; }
+</style>
+</head>
+<body>
+
+<div id="card"></div>
+
+<div id="panel">
+  <h3 style="margin:0 0 6px">Service calls</h3>
+  <pre id="log"></pre>
+  <button id="sim-off">state: off</button>
+  <button id="sim-heat">state: heat</button>
+  <button id="sim-unavail">state: unavailable</button>
+  <button id="sim-churn">spam 50 unrelated state updates</button>
+  <button id="probe">probe angle mapping</button>
+  <h3 style="margin:10px 0 4px">Room status (§14 states)</h3>
+  <button id="st-active">HEATING_REQUIRED / ACTIVE</button>
+  <button id="st-sleep">SATISFIED / SLEEPING</button>
+  <button id="st-wait">COOLING_REQUESTED / WAITING_FOR_GROUP</button>
+  <button id="st-blocked">COOLING_REQUESTED / BLOCKED_BY_GROUP</button>
+  <button id="st-none">no status entities</button>
+  <pre id="probe-out" style="height:160px"></pre>
+</div>
+
+<script type="module">
+import "./multisplit-climate-card.js";
+
+const log = document.getElementById("log");
+const say = (m) => {
+  log.textContent += m + "\n";
+  log.scrollTop = log.scrollHeight;
+};
+
+const states = {
+  "climate.office": {
+    entity_id: "climate.office",
+    state: "heat",
+    attributes: {
+      friendly_name: "Office",
+      current_temperature: 19.4,
+      temperature: 21,
+      min_temp: 16,
+      max_temp: 30,
+      target_temp_step: 0.5,
+      hvac_action: "heating",
+    },
+  },
+  "sensor.outdoor_mode": {
+    entity_id: "sensor.outdoor_mode",
+    state: "heat",
+    attributes: { friendly_name: "Outdoor unit mode" },
+  },
+  "sensor.noise": { entity_id: "sensor.noise", state: "0", attributes: {} },
+  "sensor.office_demand": {
+    entity_id: "sensor.office_demand",
+    state: "HEATING_REQUIRED",
+    attributes: {},
+    last_changed: new Date().toISOString(),
+  },
+  "sensor.office_execution": {
+    entity_id: "sensor.office_execution",
+    state: "ACTIVE",
+    attributes: {},
+    last_changed: new Date().toISOString(),
+  },
+  "sensor.office_status_reason": {
+    entity_id: "sensor.office_status_reason",
+    state: "unknown",
+    attributes: {},
+    last_changed: new Date().toISOString(),
+  },
+};
+
+const hass = {
+  states,
+  config: { unit_system: { temperature: "°C" } },
+  callService(domain, service, data) {
+    say(`${domain}.${service} ${JSON.stringify(data)}`);
+    // Echo back like HA would, after a short delay.
+    return new Promise((resolve) => {
+      setTimeout(() => {
+        if (service === "set_temperature") {
+          const s = states["climate.office"];
+          states["climate.office"] = {
+            ...s,
+            attributes: { ...s.attributes, temperature: data.temperature },
+          };
+          push();
+        }
+        resolve();
+      }, 120);
+    });
+  },
+};
+
+const card = document.createElement("multisplit-climate-card");
+card.setConfig({
+  type: "custom:multisplit-climate-card",
+  entity: "climate.office",
+  group_mode: "sensor.outdoor_mode",
+  mode_request: {
+    service: "script.multisplit_request_mode",
+  },
+  room_status: {
+    demand_entity: "sensor.office_demand",
+    execution_entity: "sensor.office_execution",
+    reason_entity: "sensor.office_status_reason",
+  },
+});
+document.getElementById("card").appendChild(card);
+
+function push() {
+  // HA hands over a NEW hass object each time.
+  card.hass = { ...hass, states: { ...states } };
+}
+push();
+
+window.__card = card;
+window.__push = push;
+window.__states = states;
+
+// Count how often the card rebuilds its DOM, to prove updates are patches.
+let builds = 0;
+const origBuild = card._build.bind(card);
+card._build = () => { builds++; origBuild(); };
+window.__builds = () => builds;
+
+card.addEventListener("hass-more-info", (e) =>
+  say(`hass-more-info detail=${JSON.stringify(e.detail)}`)
+);
+
+const setState = (s, action) => {
+  const c = states["climate.office"];
+  states["climate.office"] = {
+    ...c,
+    state: s,
+    attributes: { ...c.attributes, hvac_action: action },
+  };
+  push();
+  say(`-- climate.office -> ${s}`);
+};
+
+document.getElementById("sim-off").onclick = () => setState("off", "off");
+document.getElementById("sim-heat").onclick = () => setState("heat", "heating");
+document.getElementById("sim-unavail").onclick = () => setState("unavailable", null);
+
+document.getElementById("sim-churn").onclick = () => {
+  const before = builds;
+  for (let i = 0; i < 50; i++) {
+    states["sensor.noise"] = {
+      entity_id: "sensor.noise",
+      state: String(i),
+      attributes: {},
+    };
+    push();
+  }
+  say(`50 unrelated updates -> rebuilds: ${builds - before} (want 0)`);
+};
+
+document.getElementById("panel").insertAdjacentHTML("beforeend",
+  `<h3 style="margin:10px 0 4px">Backend verdict</h3>
+   <button id="v-accept">group switched -> ACCEPTED</button>
+   <button id="v-reject">arbitration refused -> REJECTED</button>
+   <button id="v-silent">stay silent (test timeout)</button>`);
+
+const setStatus = (demand, execution, reason) => {
+  const now = new Date().toISOString();
+  states["sensor.office_demand"] = { entity_id: "sensor.office_demand", state: demand, attributes: {}, last_changed: now };
+  states["sensor.office_execution"] = { entity_id: "sensor.office_execution", state: execution, attributes: {}, last_changed: now };
+  states["sensor.office_status_reason"] = { entity_id: "sensor.office_status_reason", state: reason || "unknown", attributes: {}, last_changed: now };
+  push();
+  say(`-- status ->  / -e`);
+};
+
+document.getElementById("st-active").onclick = () => setStatus("HEATING_REQUIRED", "ACTIVE");
+document.getElementById("st-sleep").onclick = () => setStatus("SATISFIED", "SLEEPING", "Room is 0.8° above the resume threshold");
+document.getElementById("st-wait").onclick = () => setStatus("COOLING_REQUESTED", "WAITING_FOR_GROUP", "Group mode change under minimum runtime for another 14 min");
+document.getElementById("st-blocked").onclick = () => setStatus("COOLING_REQUESTED", "BLOCKED_BY_GROUP", "Outdoor unit is in HEAT for Bedroom and Living Room");
+document.getElementById("st-none").onclick = () => { delete states["sensor.office_demand"]; delete states["sensor.office_execution"]; delete states["sensor.office_status_reason"]; push(); say("-- status entities removed"); };
+
+// Walk the clock and report what value each compass point maps to.
+document.getElementById("probe").onclick = () => {
+  const out = [];
+  const svg = card.shadowRoot.querySelector("#dial");
+  const r = svg.getBoundingClientRect();
+  const cx = r.left + r.width / 2;
+  const cy = r.top + r.height / 2;
+  const rad = r.width * 0.38;
+
+  for (let deg = 0; deg < 360; deg += 15) {
+    const a = ((deg - 90) * Math.PI) / 180;
+    const fake = {
+      clientX: cx + rad * Math.cos(a),
+      clientY: cy + rad * Math.sin(a),
+    };
+    out.push(`${String(deg).padStart(3)}° -> ${card._valueForPointer(fake)}`);
+  }
+  document.getElementById("probe-out").textContent = out.join("\n");
+};
+</script>
+</body>
+</html>
+<script type="module">
+// Backend stand-in for the request loop.
+const card = window.__card;
+const states = window.__states;
+const push = window.__push;
+
+const verdict = (execution, reason, groupMode, demand, action) => {
+  const now = new Date().toISOString();
+  if (demand) {
+    states["sensor.office_demand"] = {
+      entity_id: "sensor.office_demand", state: demand, attributes: {}, last_changed: now,
+    };
+  }
+  if (action) {
+    const c = states["climate.office"];
+    states["climate.office"] = { ...c, state: action === "cooling" ? "cool" : "heat", attributes: { ...c.attributes, hvac_action: action } };
+  }
+  if (groupMode) {
+    states["sensor.outdoor_mode"] = {
+      entity_id: "sensor.outdoor_mode", state: groupMode, attributes: {}, last_changed: now,
+    };
+  }
+  states["sensor.office_execution"] = {
+    entity_id: "sensor.office_execution", state: execution, attributes: {}, last_changed: now,
+  };
+  states["sensor.office_status_reason"] = {
+    entity_id: "sensor.office_status_reason", state: reason, attributes: {}, last_changed: now,
+  };
+  push();
+};
+
+document.getElementById("v-accept").onclick = () =>
+  verdict("ACTIVE", "Group switched to COOL at 18:04", "cool", "COOLING_REQUESTED", "cooling");
+document.getElementById("v-reject").onclick = () =>
+  verdict("BLOCKED_BY_GROUP", "Bedroom and Living Room still require heat", "heat", "COOLING_REQUESTED", "heating");
+document.getElementById("v-silent").onclick = () => {};
+</script>

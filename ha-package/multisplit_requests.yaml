@@ -1,0 +1,407 @@
+# Multi-split room mode requests
+#
+# Additive: this does NOT touch the group HVAC mode controller or the
+# participation optimiser. It lets a room ASK, records the ask, and watches
+# whether the existing arbitration granted it.
+#
+# Group membership is NOT defined here. It lives in your group HVAC mode
+# blueprint and nowhere else. The card already knows which group a room
+# belongs to (its `group_mode:` option) and passes that to the script, so
+# there is no second copy to keep in sync.
+#
+# Helper names are derived from the climate entity:
+#   climate.office  ->  msc_office_demand / _execution / _reason / ...
+#
+# Install:
+#   1. config/packages/multisplit_requests.yaml
+#   2. configuration.yaml:
+#        homeassistant:
+#          packages: !include_dir_named packages
+#   3. Restart Home Assistant.
+#
+# To add a room: copy the msc_office_* helpers and rename. Nothing else.
+# The resolver automation discovers rooms from the helpers themselves.
+
+input_select:
+  msc_office_demand:
+    name: Office demand
+    icon: mdi:home-thermometer
+    options:
+      - NONE
+      - HEATING_REQUIRED
+      - SATISFIED
+      - COOLING_REQUESTED
+    initial: NONE
+
+  msc_office_execution:
+    name: Office execution
+    icon: mdi:play-pause
+    options:
+      - ACTIVE
+      - SLEEPING
+      - WAITING_FOR_GROUP
+      - BLOCKED_BY_GROUP
+    initial: SLEEPING
+
+input_text:
+  msc_office_reason:
+    name: Office status reason
+    max: 255
+
+  msc_office_requested_mode:
+    name: Office requested mode
+    max: 20
+
+  # Which group helper this room was waiting on when it asked. Written by
+  # the script, read by the resolver. Avoids duplicating membership.
+  msc_office_group:
+    name: Office group entity
+    max: 255
+
+template:
+  - sensor:
+      # ---- POINT THIS AT YOUR OUTDOOR SENSOR -------------------------------
+      # The single place the outdoor temperature source is named. Everything
+      # else references sensor.msc_outdoor_temperature.
+      - name: MSC outdoor temperature
+        unique_id: msc_outdoor_temperature
+        unit_of_measurement: "°C"
+        device_class: temperature
+        state: "{{ states('sensor.outside_temperature') }}"
+      # ----------------------------------------------------------------------
+
+  - binary_sensor:
+      # Is cooling permitted at all right now? Single source of truth: the
+      # request script uses it today, and the group mode controller should
+      # use the same entity once the backend work happens, so the threshold
+      # is never defined in two places.
+      - name: MSC cooling available
+        unique_id: msc_cooling_available
+        icon: mdi:snowflake-off
+        state: >-
+          {% set t = states('sensor.msc_outdoor_temperature') | float(none) %}
+          {% set lock = states('input_number.msc_cool_lockout_below') | float(22) %}
+          {% set gap = states('input_number.msc_lockout_hysteresis') | float(1) %}
+          {% if t is none %}
+            {{ this.state == 'on' }}
+          {% elif t >= lock + gap %}
+            true
+          {% elif t < lock %}
+            false
+          {% else %}
+            {{ this.state == 'on' }}
+          {% endif %}
+        attributes:
+          reason: >-
+            {% set t = states('sensor.msc_outdoor_temperature') | float(none) %}
+            {% set lock = states('input_number.msc_cool_lockout_below') | float(22) %}
+            {% if t is none %}
+              Outdoor temperature unavailable - holding the previous decision
+            {% elif t < lock %}
+              Cooling is locked out below {{ lock | round(1) }}°C - it is
+              {{ t | round(1) }}°C outside
+            {% else %}
+              Cooling is permitted - {{ t | round(1) }}°C outside
+            {% endif %}
+
+input_number:
+  msc_cool_lockout_below:
+    name: Multi-split cooling lockout below
+    min: 0
+    max: 30
+    step: 0.5
+    initial: 22
+    unit_of_measurement: "°C"
+    icon: mdi:snowflake-thermometer
+
+  msc_lockout_hysteresis:
+    name: Multi-split lockout hysteresis
+    min: 0
+    max: 5
+    step: 0.1
+    initial: 1
+    unit_of_measurement: "°C"
+    icon: mdi:arrow-expand-vertical
+
+  msc_request_patience_minutes:
+    name: Multi-split request patience
+    min: 1
+    max: 240
+    step: 1
+    initial: 30
+    unit_of_measurement: min
+    icon: mdi:timer-sand
+
+input_datetime:
+  msc_office_requested_at:
+    name: Office request timestamp
+    has_date: true
+    has_time: true
+
+script:
+  multisplit_request_mode:
+    alias: Multi-split - request a group mode for a room
+    mode: queued
+    max: 10
+    description: >-
+      Called by multisplit-climate-card. Records a room's request for a group
+      HVAC mode. Decides nothing: if the group is already in the requested
+      mode the room simply rejoins, otherwise the request is parked as
+      WAITING_FOR_GROUP for the existing arbitration to act on.
+    fields:
+      mode:
+        description: "Requested group mode: heat or cool."
+        example: cool
+        required: true
+        selector:
+          select:
+            options: [heat, cool]
+      climate_entity:
+        description: The room's climate entity.
+        example: climate.office
+        required: true
+        selector:
+          entity:
+            domain: climate
+      group_entity:
+        description: >-
+          The group mode helper this room belongs to. Supplied by the card
+          from its own `group_mode:` option.
+        example: input_select.group_a_hvac_mode
+        required: true
+        selector:
+          entity:
+            domain: input_select
+    variables:
+      # climate.office -> msc_office
+      key: "msc_{{ climate_entity.split('.')[1] }}"
+      group_mode: "{{ states(group_entity) | lower }}"
+      target_now: >-
+        {{ state_attr(climate_entity, 'temperature')
+           or state_attr(climate_entity, 'target_temp_low')
+           or state_attr(climate_entity, 'target_temp_high') }}
+    sequence:
+      - alias: Refuse to run against helpers that do not exist
+        condition: template
+        value_template: >-
+          {{ states('input_select.' ~ key ~ '_execution') not in
+             ['unknown', 'unavailable'] }}
+
+      - alias: Record what was asked for
+        parallel:
+          - action: input_text.set_value
+            target:
+              entity_id: "input_text.{{ key }}_requested_mode"
+            data:
+              value: "{{ mode }}"
+          - action: input_text.set_value
+            target:
+              entity_id: "input_text.{{ key }}_group"
+            data:
+              value: "{{ group_entity }}"
+          - action: input_datetime.set_datetime
+            target:
+              entity_id: "input_datetime.{{ key }}_requested_at"
+            data:
+              datetime: "{{ now().strftime('%Y-%m-%d %H:%M:%S') }}"
+          - action: input_select.select_option
+            target:
+              entity_id: "input_select.{{ key }}_demand"
+            data:
+              option: >-
+                {{ 'COOLING_REQUESTED' if mode == 'cool' else 'HEATING_REQUIRED' }}
+
+      - choose:
+          # Hard lockout. Answer now, with the real reason, rather than
+          # parking a request that could never be granted.
+          - conditions:
+              - condition: template
+                value_template: >-
+                  {{ mode == 'cool'
+                     and is_state('binary_sensor.msc_cooling_available', 'off') }}
+            sequence:
+              - action: input_select.select_option
+                target:
+                  entity_id: "input_select.{{ key }}_execution"
+                data:
+                  option: BLOCKED_BY_GROUP
+              - action: input_text.set_value
+                target:
+                  entity_id: "input_text.{{ key }}_reason"
+                data:
+                  value: >-
+                    {{ state_attr('binary_sensor.msc_cooling_available', 'reason')
+                       | default('Cooling is locked out by outdoor temperature', true) }}
+
+          # The group is already where the room wants it: just rejoin.
+          - conditions:
+              - condition: template
+                value_template: "{{ group_mode == mode }}"
+            sequence:
+              # Mode AND temperature together, deliberately. Restoring the
+              # mode alone lets the unit fall back to its own remembered
+              # setpoint, which is how the Office ended up heating to 23.
+              - action: climate.set_temperature
+                target:
+                  entity_id: "{{ climate_entity }}"
+                data:
+                  hvac_mode: "{{ mode }}"
+                  temperature: "{{ target_now }}"
+                enabled: "{{ target_now is not none }}"
+              - action: input_select.select_option
+                target:
+                  entity_id: "input_select.{{ key }}_execution"
+                data:
+                  option: ACTIVE
+              - action: input_text.set_value
+                target:
+                  entity_id: "input_text.{{ key }}_reason"
+                data:
+                  value: >-
+                    Group was already in {{ mode | upper }} - room rejoined at
+                    {{ now().strftime('%H:%M') }}
+
+        # Different mode: park it. Arbitration owns this decision, not us.
+        default:
+          - action: input_select.select_option
+            target:
+              entity_id: "input_select.{{ key }}_execution"
+            data:
+              option: WAITING_FOR_GROUP
+          - action: input_text.set_value
+            target:
+              entity_id: "input_text.{{ key }}_reason"
+            data:
+              value: >-
+                Asked for {{ mode | upper }} while the group is in
+                {{ group_mode | upper }} - waiting for arbitration
+
+automation:
+  - id: msc_resolve_mode_requests
+    alias: Multi-split - resolve parked mode requests
+    description: >-
+      Watches whether a parked request was granted by the existing group mode
+      controller. Decides nothing itself - it only reports the outcome. Rooms
+      are discovered from the msc_*_execution helpers, so adding a room needs
+      no change here.
+    mode: queued
+    max: 10
+    triggers:
+      # The group helpers your blueprint writes. Add a line per group.
+      - trigger: state
+        entity_id:
+          - input_select.group_a_hvac_mode
+          - input_select.group_b_hvac_mode
+        id: group_changed
+      - trigger: state
+        entity_id: binary_sensor.msc_cooling_available
+        id: lockout_changed
+      - trigger: time_pattern
+        minutes: "/1"
+        id: tick
+    variables:
+      # Only used for a neutral "still waiting" note. NOT a rejection
+      # threshold -- see the comment on the resolver logic below.
+      patience_minutes: >-
+        {{ states('input_number.msc_request_patience_minutes') | int(30) }}
+      parked: >-
+        {{ states.input_select
+           | selectattr('entity_id', 'match', 'input_select\.msc_.*_execution')
+           | selectattr('state', 'eq', 'WAITING_FOR_GROUP')
+           | map(attribute='entity_id')
+           | list }}
+    actions:
+      - repeat:
+          for_each: "{{ parked }}"
+          sequence:
+            - variables:
+                key: >-
+                  {{ repeat.item.split('.')[1] | replace('_execution', '') }}
+                wanted: >-
+                  {{ states('input_text.' ~ key ~ '_requested_mode') | lower }}
+                group_entity: "{{ states('input_text.' ~ key ~ '_group') }}"
+                group_mode: >-
+                  {{ states(group_entity) | lower if group_entity not in
+                     ['unknown', 'unavailable', ''] else none }}
+                waited_minutes: >-
+                  {{ ((now().timestamp()
+                       - as_timestamp(
+                           states('input_datetime.' ~ key ~ '_requested_at'),
+                           now().timestamp())) / 60) | round(0) }}
+                # True only when THIS room's group helper is what just moved.
+                its_group_moved: >-
+                  {{ trigger.id == 'group_changed'
+                     and trigger.entity_id == group_entity }}
+            - choose:
+                - alias: Lockout closed while the request was parked
+                  conditions:
+                    - "{{ wanted == 'cool'
+                          and is_state('binary_sensor.msc_cooling_available', 'off') }}"
+                  sequence:
+                    - action: input_select.select_option
+                      target:
+                        entity_id: "input_select.{{ key }}_execution"
+                      data:
+                        option: BLOCKED_BY_GROUP
+                    - action: input_text.set_value
+                      target:
+                        entity_id: "input_text.{{ key }}_reason"
+                      data:
+                        value: >-
+                          {{ state_attr('binary_sensor.msc_cooling_available', 'reason')
+                             | default('Cooling is locked out by outdoor temperature', true) }}
+                - alias: Granted - the group moved to what the room asked for
+                  conditions:
+                    - "{{ wanted and group_mode and group_mode == wanted }}"
+                  sequence:
+                    - action: input_select.select_option
+                      target:
+                        entity_id: "input_select.{{ key }}_execution"
+                      data:
+                        option: ACTIVE
+                    - action: input_text.set_value
+                      target:
+                        entity_id: "input_text.{{ key }}_reason"
+                      data:
+                        value: >-
+                          Group switched to {{ wanted | upper }} at
+                          {{ now().strftime('%H:%M') }}
+
+                # A rejection is only reported on evidence that arbitration
+                # actually ran and chose otherwise -- i.e. the group moved,
+                # but not to what this room asked for. Elapsed time is NOT
+                # evidence: hysteresis and minimum runtime live in separate
+                # blueprints, so "nothing happened yet" and "we were turned
+                # down" are indistinguishable from a clock alone.
+                - alias: Declined - arbitration moved the group elsewhere
+                  conditions:
+                    - "{{ wanted and its_group_moved and group_mode != wanted }}"
+                  sequence:
+                    - action: input_select.select_option
+                      target:
+                        entity_id: "input_select.{{ key }}_execution"
+                      data:
+                        option: BLOCKED_BY_GROUP
+                    - action: input_text.set_value
+                      target:
+                        entity_id: "input_text.{{ key }}_reason"
+                      data:
+                        value: >-
+                          Arbitration moved the group to
+                          {{ group_mode | upper }} at
+                          {{ now().strftime('%H:%M') }}, not the
+                          {{ wanted | upper }} this room asked for
+
+                # Still parked. Say so once, and keep waiting -- never
+                # manufacture a verdict the system never gave.
+                - alias: Long wait - note it, stay waiting
+                  conditions:
+                    - "{{ wanted and waited_minutes >= patience_minutes }}"
+                  sequence:
+                    - action: input_text.set_value
+                      target:
+                        entity_id: "input_text.{{ key }}_reason"
+                      data:
+                        value: >-
+                          Asked for {{ wanted | upper }}; no decision after
+                          {{ patience_minutes }} min - still waiting
