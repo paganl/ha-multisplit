@@ -65,7 +65,15 @@ jobs:
 
   hacs:
     # What HACS checks before it will accept the repository.
+    #
+    # Non-blocking, because the HACS action refuses to validate a private
+    # repository at all: "the HACS action can only validate public
+    # repositories". Nothing here is wrong with the integration -- the check
+    # simply cannot run until the repository is public, and HACS cannot
+    # install from a private repository either. Make this blocking the day the
+    # repository goes public.
     runs-on: ubuntu-latest
+    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - uses: hacs/action@main

@@ -31,6 +31,10 @@ untrue — and a room that cannot have what it asked for should be able to say
 Add this repository as a custom repository (HACS → ⋮ → Custom repositories),
 category **Integration**, then install and restart Home Assistant.
 
+**This requires the repository to be public.** HACS cannot install from a
+private repository, and its validation action refuses to run against one.
+While the repository is private, install manually.
+
 ### Manually
 
 Copy `custom_components/multisplit` into your Home Assistant `custom_components`
