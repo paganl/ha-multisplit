@@ -60,15 +60,16 @@ unless a room genuinely matters more than the others.
 
 | Room | `climate.*` entity | Temperature sensor(s) | Group | Priority | `schedule.*` (if any) |
 | --- | --- | --- | --- | --- | --- |
-| | | | | 1.0 | |
-| | | | | 1.0 | |
-| | | | | 1.0 | |
-| | | | | 1.0 | |
+| Office|climate.mitsubishi_ac_office_mitsubishi_ac_office_climate | |B| 1.0 | |
+| Living Room| climate.mitsubishi_ac_livingroom_mitsubishi_ac_livingroom_climate|sensor.average_living_room_temperature | A| 1.0 | |
+| Bedroom|climate.mitsubishi_ac_bedroom_mitsubishi_ac_bedroom_climate | | B| 1.0 | |
+| Erin's Bedroom| climate.mitsubishi_ac_erin_mitsubishi_ac_erin_climate| | B| 1.0 | |
+| Ischa's Bedroom| climate.mitsubishi_ac_ischa_mitsubishi_ac_ischa_climat| |A | 1.0 | |
 
 Where a room has more than one candidate sensor, list them in preference
 order — `measurement.py` takes the first one that isn't stale.
 
-**Outdoor temperature source:** `____________________`
+**Outdoor temperature source:** `sensor.openweathermap_temperature`
 
 Is that a real outdoor sensor, the outdoor unit's own reading, or a
 `weather.*` forecast entity? It matters: the unit's own sensor sits in a
@@ -89,8 +90,8 @@ lists the entities that were selected when it was set up.
 
 | Outdoor unit | Helper entity today | Rooms on it |
 | --- | --- | --- |
-| Group A | `input_select.group_a_hvac_mode` | |
-| Group B | `input_select.group_b_hvac_mode` | |
+| Group A | `input_select.group_a_hvac_mode` |LivingRoom,Ischa's Bedroom|
+| Group B | `input_select.group_b_hvac_mode` |Bedroom,Erin's Bedroom,Office |
 
 Also worth recording while you are in there:
 
@@ -121,10 +122,10 @@ you changed.
 
 | What | Value today | Where it came from |
 | --- | --- | --- |
-| Overshoot cut-off (how far past target before the unit is powered off) | | |
+| Overshoot cut-off (how far past target before the unit is powered off) | 1.5| |
 | Run duration before cut-off is allowed (anti short-cycle) | | |
 | Rest period before the unit may restart | | |
-| Resume threshold (how far below target before restarting) | | |
+| Resume threshold (how far below target before restarting) | 0.5| |
 | Anything else with a number in it | | |
 
 ### C2 — How it varies with outdoor temperature
@@ -134,9 +135,9 @@ temperature". This is the part worth the most care.
 
 | Outdoor temperature | Cut-off offset | Rest period | Notes |
 | --- | --- | --- | --- |
-| Cold (around 0 °C) | | | |
-| Mild (around 7 °C) | | | |
-| Shoulder (around 12–14 °C) | | | |
+| Cold (around 0 °C) |5 | | |
+| Mild (around 7 °C) | 15| | |
+| Shoulder (around 12–14 °C) |25 | | |
 
 If it was a formula rather than a table, write the formula. If it was a single
 threshold with a separate outdoor-temperature *condition* gating it (below X,
