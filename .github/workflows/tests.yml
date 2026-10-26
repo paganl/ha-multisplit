@@ -21,11 +21,53 @@ jobs:
       - run: pip install pytest pyflakes pyyaml
       - run: python -m pytest tests/
       - run: python -m pyflakes custom_components/multisplit/ tests/ tools/
-      - name: multisplit.yaml must match questionnaire.yaml
-        run: python tools/build_config.py --check
       - name: the core must not import Home Assistant
         run: |
           if grep -rn "homeassistant" custom_components/multisplit/core/ --include='*.py'; then
             echo "::error::core/ imported Home Assistant — the decision layer must stay pure"
             exit 1
           fi
+      - name: multisplit.yaml must match questionnaire.yaml
+        run: python tools/build_config.py --check
+
+  integration:
+    # Everything above core/ does import Home Assistant, so this job checks it
+    # against the real thing: wrong import paths and renamed APIs are the main
+    # way a custom integration fails after a Home Assistant upgrade, and they
+    # are invisible to the pure tests.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install homeassistant
+      - name: every module imports against the installed Home Assistant
+        run: |
+          python - <<'PY'
+          import importlib, sys
+          sys.path.insert(0, ".")
+          for module in (
+              "const", "generate", "yaml_config", "entity", "measurement", "intent",
+              "reconciler", "telemetry", "diagnostics", "coordinator", "config_flow",
+              "sensor", "binary_sensor", "climate", "__init__",
+          ):
+              importlib.import_module(f"custom_components.multisplit.{module}")
+              print("ok", module)
+          PY
+
+  hassfest:
+    # Home Assistant's own manifest and structure validation.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: home-assistant/actions/hassfest@master
+
+  hacs:
+    # What HACS checks before it will accept the repository.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hacs/action@main
+        with:
+          category: integration

@@ -4,16 +4,14 @@ These tests exist so the two cannot drift apart silently, and so a change to
 the generator cannot quietly rewrite the measured values.
 """
 
-import sys
 from pathlib import Path
 
 import pytest
 import yaml
 
-ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT / "tools"))
+import generate
 
-import build_config  # noqa: E402
+ROOT = Path(__file__).resolve().parent.parent
 
 QUESTIONNAIRE = yaml.safe_load((ROOT / "questionnaire.yaml").read_text(encoding="utf-8"))
 
@@ -24,7 +22,7 @@ def questions():
 
 def test_the_committed_config_matches_the_questionnaire():
     """The drift check, as a test rather than only as a CI step."""
-    rendered, _, missing = build_config.generate(QUESTIONNAIRE, ask=False)
+    rendered, _, missing = generate.generate(QUESTIONNAIRE)
     assert missing == []
     assert rendered == (ROOT / "multisplit.yaml").read_text(encoding="utf-8"), (
         "multisplit.yaml is stale — run: python3 tools/build_config.py"
@@ -40,8 +38,13 @@ def test_every_question_is_answered_or_has_a_stated_assumption():
 
 def test_the_assumed_values_are_the_ones_we_think_they_are():
     """A guard against an assumption quietly becoming invisible."""
-    _, assumed, _ = build_config.generate(QUESTIONNAIRE, ask=False)
+    _, assumed, _ = generate.generate(QUESTIONNAIRE)
     assert set(assumed) == {
+        "tick_seconds",
+        "write_interval_seconds",
+        "stale_after_minutes",
+        "telemetry_max_mb",
+        "telemetry_events",
         "min_on_minutes",
         "lockout_hysteresis",
         "deadband",
@@ -49,6 +52,18 @@ def test_the_assumed_values_are_the_ones_we_think_they_are():
         "inertia_half_life_minutes",
         "aging_rate",
     }
+
+
+def test_shadow_mode_is_the_shipped_default():
+    """Writes stay off until the divergences from the old system are looked at."""
+    generated = yaml.safe_load((ROOT / "multisplit.yaml").read_text(encoding="utf-8"))
+    assert generated["operation"]["apply_to_hardware"] is False
+
+
+def test_telemetry_is_on_by_default():
+    """The curves cannot be refitted from data nobody recorded."""
+    generated = yaml.safe_load((ROOT / "multisplit.yaml").read_text(encoding="utf-8"))
+    assert generated["telemetry"]["enabled"] is True
 
 
 def test_the_harvested_values_are_not_assumptions():
@@ -90,6 +105,10 @@ def test_every_target_is_reachable_in_the_generated_config():
         ("curve", []),
         ("curve", [[7.0, 1.0], [0.0, 2.0]]),
         ("records", [{"name": "no key field"}]),
+        ("boolean", "yes"),
+        ("boolean", 1),
+        ("text", ""),
+        ("text", 7),
     ],
 )
 def test_bad_answers_are_refused(kind, value):
@@ -100,11 +119,11 @@ def test_bad_answers_are_refused(kind, value):
         "options": ["heat", "cool", "auto"],
         "key_field": "key",
     }
-    with pytest.raises(build_config.AnswerError):
-        build_config.validate(question, value)
+    with pytest.raises(generate.AnswerError):
+        generate.validate(question, value)
 
 
 def test_a_duplicate_room_key_is_refused():
     question = {"id": "rooms", "type": "records", "key_field": "key"}
-    with pytest.raises(build_config.AnswerError, match="duplicate"):
-        build_config.validate(question, [{"key": "office"}, {"key": "office"}])
+    with pytest.raises(generate.AnswerError, match="duplicate"):
+        generate.validate(question, [{"key": "office"}, {"key": "office"}])

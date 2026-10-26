@@ -1,0 +1,97 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Multi-split climate control",
+        "description": "Reads multisplit.yaml from the configuration directory. Generate it from questionnaire.yaml first."
+      }
+    },
+    "abort": {
+      "single_instance_allowed": "Multi-split climate control is already set up.",
+      "file_missing": "multisplit.yaml was not found in the configuration directory."
+    },
+    "error": {
+      "invalid_config": "{problems}"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Reconfigure",
+        "description": "Pick a section to change. Answers are written back to questionnaire.yaml, multisplit.yaml is regenerated, and the controller restarts.",
+        "data": {
+          "section": "Section"
+        }
+      },
+      "edit": {
+        "title": "{section}",
+        "description": "Leave a field as it is to keep the current answer. Curves and lists are edited as YAML.",
+        "data": {
+          "outdoor_sensor": "Which entity reports the outdoor temperature?",
+          "apply_to_hardware": "Should the integration command the units, or only publish what it would do?",
+          "tick_seconds": "How often should the system re-evaluate everything? (seconds)",
+          "write_interval_seconds": "At minimum, how long between two commands to the same unit? (seconds)",
+          "stale_after_minutes": "After how long without an update is a temperature reading not to be trusted? (minutes)",
+          "telemetry_enabled": "Should every cycle be recorded for later analysis?",
+          "telemetry_file": "What should the telemetry file be called?",
+          "telemetry_max_mb": "How large may the telemetry file grow before it is rotated? (megabytes)",
+          "telemetry_events": "Should each cycle also be fired as a Home Assistant event?",
+          "groups": "What are the outdoor units, and what should each be called?",
+          "rooms": "Which rooms are on which outdoor unit, and what does each talk to?",
+          "cut_off_offset": "How far past target did you let a room go before powering the unit off? (degrees past target)",
+          "rest_minutes": "How long did you leave the unit off, and did that depend on the weather? (minutes of rest)",
+          "resume_deadband": "How far below target before the unit was allowed to restart? (degrees below target)",
+          "min_on_minutes": "Once running, how long must a unit stay on before it may be stopped? (minutes)",
+          "cool_below": "Below what outdoor temperature should cooling be refused? (°C outdoor)",
+          "heat_above": "Above what outdoor temperature should heating be refused? (°C outdoor)",
+          "lockout_hysteresis": "How far past a lockout must the weather go before it lifts? (degrees)",
+          "season": "Should the system be locked to one season, or decide for itself?",
+          "setpoint_range": "What is the lowest and highest target temperature anyone may set? (°C)",
+          "deadband": "How far from target before a room counts as wanting something? (degrees)",
+          "overshoot_tolerance": "How far past target may a room sit before it counts as wanting the opposite mode? (degrees)",
+          "default_target": "What should a room aim for when no schedule applies? (°C)",
+          "away_target": "What should a room aim for when the house is unoccupied? (°C)",
+          "inertia_weight": "How strongly should the group resist changing mode?",
+          "inertia_half_life_minutes": "How quickly should that resistance fade? (minutes)",
+          "aging_rate": "How fast should an unserved room gain priority? (weight per hour)"
+        },
+        "data_description": {
+          "outdoor_sensor": "Every lockout and every participation curve is indexed against this entity, so the curves are only valid while it stays the same one. A weather service is usually better than the outdoor unit's own sensor, which sits in a sun-trap often enough to read several degrees off.",
+          "apply_to_hardware": "false is shadow mode: the plan is computed every tick and published to the status sensors, but nothing is written to any unit. The existing blueprints keep running the house, and every divergence between what they did and what the planner would have done is either a bug here or a behaviour of the old system nobody wrote down. Leave this false until those divergences have been looked at; it is the cheapest safety net in the project and the only one that costs nothing to keep.",
+          "tick_seconds": "The reconciler is idempotent and rate-limited per unit, so a fast tick costs little and makes the system quicker to correct a unit that was changed at the wall. The per-unit rate limit, not this, is what protects the compressor. Currently an assumption, not a measurement.",
+          "write_interval_seconds": "The per-unit rate limit. It keeps the reconciler clear of the compressor's own anti-cycle lockout even if something upstream changes its mind rapidly. Currently an assumption, not a measurement.",
+          "stale_after_minutes": "A room with no trustworthy reading stands by and says so, rather than guessing — a stale sensor otherwise produces a confident wrong decision for the whole group. Battery sensors that report on change need a generous value; a mains-powered one that reports every minute does not. Currently an assumption, not a measurement.",
+          "telemetry_enabled": "Writes one JSON object per cycle: outdoor temperature, and for each room its target, measured temperature, what it wanted, what it was told to do and why. This is the raw material for fitting the overshoot curve and for replaying history against candidate inertia values offline — which is possible precisely because the planner is a pure function.",
+          "telemetry_file": "Relative to the Home Assistant configuration directory. One JSON object per line, so it can be read incrementally and tailed.",
+          "telemetry_max_mb": "At one record every 30 seconds a season of data is tens of megabytes. On rotation the current file is kept as .1 and a new one started, so the most recent history always survives. Currently an assumption, not a measurement.",
+          "telemetry_events": "Fires multisplit_cycle, which automations and the logbook can react to. Independent of the file: the file is for analysis, the event is for reacting. Currently an assumption, not a measurement.",
+          "groups": "One group per outdoor unit. Rooms on the same outdoor unit cannot heat and cool at the same time -- that constraint is the whole reason this system exists.",
+          "rooms": "`temperature_sensors` is in preference order; the first reading that is not stale wins. An empty list falls back to the indoor unit's own sensor, which sits in the return air path and reads warm while heating -- it measures the unit, not the room, so every threshold inherits that bias.",
+          "cut_off_offset": "The overshoot the duty cycle deliberately tolerates. Measured as a constant here -- it did not vary with outdoor temperature. Entered as a curve of [outdoor °C, degrees past target] so it can vary later if a measurement ever says it should; one point is a flat line.",
+          "rest_minutes": "This is the part that varied. An overshot room coasts for longer in mild weather, so resting it longer both avoids re-heating a room that is still drifting down and keeps clear of the compressor's own anti-cycle lockout.",
+          "resume_deadband": "Wider than the demand deadband, so a room does not restart the moment it drifts a fraction below target.",
+          "min_on_minutes": "Anti short-cycle protection, and the reason a room already running keeps its group in its mode: it cannot stop yet, so the group must not change mode out from under it. Currently an assumption, not a measurement.",
+          "cool_below": "A cooling request below this is rejected immediately with a reason, rather than waiting indefinitely for an outdoor unit that will not deliver it. null disables the lockout.",
+          "heat_above": "The mirror of the cooling lockout. null disables it. With cooling refused below 20 and heating refused above 24, the band between them allows both and the arbitration decides; outside it the weather decides. The loader rejects the pair if they ever cross over and leave an outdoor band where neither mode is permitted.",
+          "lockout_hysteresis": "Without this, an outdoor temperature sitting on the threshold allows and forbids cooling on alternate cycles and the group changes its mind as fast as the sensor noise. Currently an assumption, not a measurement.",
+          "season": "A seasonal lock is a cheap way to stop a sunny February afternoon from asking for cooling. `auto` lets the lockouts decide instead.",
+          "setpoint_range": "Clamps every target, however it arrives -- including the away setback below, which is why the loader refuses a range that would clamp it. NOTE: HARVEST §E says 18/26, but the away target of 16 would then be unreachable: it would be clamped to 18 and the setback would silently never take effect. Lowered to 16 here so the away target works. Confirm which of the two is right -- a minimum of 18 with an away target of 18, or a minimum of 16 as set here.",
+          "deadband": "Smaller than the resume band, because this decides whether a room has an opinion at all, not whether its unit should start. Currently an assumption, not a measurement.",
+          "overshoot_tolerance": "Must exceed the cut-off above. A room parked at +1.5 by the duty cycle must not be read as asking for cooling, or the two controllers are permanently opposed and the compressor pays for it. Checked at load time against every room's cut-off.",
+          "default_target": "The target a room gets in the absence of a schedule entity, an override or an away state. Every room shares it until per-room schedules exist.",
+          "away_target": "The setback. It must sit inside the setpoint range above, or it is clamped and never takes effect -- the loader checks this, because a clamped setback looks exactly like a broken schedule.",
+          "inertia_weight": "A score bonus for staying put. Too low and it churns; too high and it is slow to respond to a genuine need. Unlike a hard minimum runtime it only biases the decision -- the system is never forbidden from responding. Currently an assumption, not a measurement.",
+          "inertia_half_life_minutes": "The bonus halves every interval, so sustained demand eventually wins. Currently an assumption, not a measurement.",
+          "aging_rate": "Extra weight per hour a room's demand goes unmet. This is what makes starvation impossible by construction and replaces the request and approve protocol: a genuinely starved room wins eventually, with nobody pressing a button. Currently an assumption, not a measurement."
+        }
+      }
+    },
+    "error": {
+      "invalid_answer": "{problems}",
+      "invalid_config": "{problems}"
+    },
+    "abort": {
+      "questionnaire_missing": "questionnaire.yaml was not found in the configuration directory, so there is nothing to reconfigure. Copy it there, or edit multisplit.yaml by hand and call multisplit.reload."
+    }
+  }
+}

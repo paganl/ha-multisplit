@@ -1,0 +1,57 @@
+reload:
+  name: Reload
+  description: >-
+    Re-read multisplit.yaml and restart the controller. Use this after editing
+    the configuration by hand; it avoids restarting Home Assistant.
+
+explain:
+  name: Explain
+  description: >-
+    Report what the system currently believes and why: each group's mode with
+    its reason and scores, each room's command with its reason, and any writes
+    the reconciler would make. The answer to "why is this room standing by?".
+  fields:
+    room:
+      name: Room
+      description: One room's key, or leave empty for everything.
+      example: living_room
+      selector:
+        text:
+
+set_room_target:
+  name: Set room target
+  description: >-
+    Override a room's target temperature. This writes intent, not hardware --
+    the planner decides what that means for the outdoor unit.
+  fields:
+    room:
+      name: Room
+      required: true
+      example: living_room
+      selector:
+        text:
+    temperature:
+      name: Target temperature
+      required: true
+      selector:
+        number:
+          min: 5
+          max: 35
+          step: 0.5
+          unit_of_measurement: "°C"
+    until:
+      name: Until
+      description: When the override should lapse. Leave empty to hold it indefinitely.
+      selector:
+        datetime:
+
+clear_override:
+  name: Clear override
+  description: Drop a room's override and return it to its schedule or default.
+  fields:
+    room:
+      name: Room
+      required: true
+      example: living_room
+      selector:
+        text:

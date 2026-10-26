@@ -1,11 +1,14 @@
 # Multi-split climate control — generated configuration.
 #
-# DO NOT EDIT. Generated from questionnaire.yaml by tools/build_config.py.
-# Change an answer there and regenerate:
+# DO NOT EDIT. Generated from questionnaire.yaml.
+#
+# Change an answer in questionnaire.yaml and regenerate:
 #
 #     python3 tools/build_config.py
 #
-# Copy to the Home Assistant configuration directory as multisplit.yaml.
+# or reconfigure through Home Assistant: Settings → Devices & services →
+# Multi-split climate → Configure, which writes the answers back and
+# regenerates this file.
 #
 # No threshold, curve, entity id or room name lives in the Python. Lines
 # marked UNMEASURED are assumptions standing in for a question nobody has
@@ -20,6 +23,77 @@
 # weather service is usually better than the outdoor unit's own sensor,
 # which sits in a sun-trap often enough to read several degrees off.
 outdoor_sensor: sensor.openweathermap_temperature
+operation:
+  #
+  # === Operation ===
+  #
+  # Should the integration command the units, or only publish what it would do?
+  # false is shadow mode: the plan is computed every tick and published to
+  # the status sensors, but nothing is written to any unit. The existing
+  # blueprints keep running the house, and every divergence between what
+  # they did and what the planner would have done is either a bug here or a
+  # behaviour of the old system nobody wrote down. Leave this false until
+  # those divergences have been looked at; it is the cheapest safety net in
+  # the project and the only one that costs nothing to keep.
+  apply_to_hardware: false
+  # How often should the system re-evaluate everything?
+  # The reconciler is idempotent and rate-limited per unit, so a fast tick
+  # costs little and makes the system quicker to correct a unit that was
+  # changed at the wall. The per-unit rate limit, not this, is what protects
+  # the compressor.
+  # Units: seconds.
+  # UNMEASURED — assumed; the question was left blank.
+  tick_seconds: 30.0
+  # At minimum, how long between two commands to the same unit?
+  # The per-unit rate limit. It keeps the reconciler clear of the
+  # compressor's own anti-cycle lockout even if something upstream changes
+  # its mind rapidly.
+  # Units: seconds.
+  # UNMEASURED — assumed; the question was left blank.
+  write_interval_seconds: 180.0
+  # After how long without an update is a temperature reading not to be trusted?
+  # A room with no trustworthy reading stands by and says so, rather than
+  # guessing — a stale sensor otherwise produces a confident wrong decision
+  # for the whole group. Battery sensors that report on change need a
+  # generous value; a mains-powered one that reports every minute does not.
+  # Units: minutes.
+  # UNMEASURED — assumed; the question was left blank.
+  stale_after_minutes: 30.0
+telemetry:
+  #
+  # === Telemetry ===
+  #
+  # The participation curves in HARVEST §C2 are the only numbers here that
+  # must be measured rather than reasoned about, and inertia is the same.
+  # Telemetry is what makes refitting them possible: one record per cycle
+  # with target, measured, outdoor and the decision, which
+  # tools/fit_curves.py turns back into a curve. Without it the numbers can
+  # only ever be guessed at again.
+  #
+  # Should every cycle be recorded for later analysis?
+  # Writes one JSON object per cycle: outdoor temperature, and for each room
+  # its target, measured temperature, what it wanted, what it was told to do
+  # and why. This is the raw material for fitting the overshoot curve and
+  # for replaying history against candidate inertia values offline — which
+  # is possible precisely because the planner is a pure function.
+  enabled: true
+  # What should the telemetry file be called?
+  # Relative to the Home Assistant configuration directory. One JSON object
+  # per line, so it can be read incrementally and tailed.
+  file: multisplit-telemetry.jsonl
+  # How large may the telemetry file grow before it is rotated?
+  # At one record every 30 seconds a season of data is tens of megabytes. On
+  # rotation the current file is kept as .1 and a new one started, so the
+  # most recent history always survives.
+  # Units: megabytes.
+  # UNMEASURED — assumed; the question was left blank.
+  max_mb: 25.0
+  # Should each cycle also be fired as a Home Assistant event?
+  # Fires multisplit_cycle, which automations and the logbook can react to.
+  # Independent of the file: the file is for analysis, the event is for
+  # reacting.
+  # UNMEASURED — assumed; the question was left blank.
+  events: true
 #
 # === Outdoor units and rooms ===
 #

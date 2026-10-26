@@ -21,7 +21,7 @@ across a boundary.
 | 4 | **Planner** | the three above + clock | `Plan` (+ reasons) | every decision |
 | 5 | **Reconciler** | `Plan` + observed hardware | service calls | the only writes to hardware |
 | 6 | **Presentation** | `Plan`, reasons, measurements | UI; writes intent only | showing state, capturing intent |
-| 7 | **Observability** | plan history | traces, logbook | why the system did what it did |
+| 7 | **Observability** | plan history | telemetry, events, diagnostics | why the system did what it did, and the data to retune it |
 
 The critical boundary is 4↔5. **The planner never writes anything and the
 reconciler never decides anything.** Violating that is how the current system
@@ -382,6 +382,15 @@ not available.
 **Tuning inertia.** Too low: churn. Too high: slow to respond. This wants
 measurement, which is cheap once plans are logged — replay history against
 candidate values offline, since the planner is pure.
+
+**Closing the loop.** The two points above are the same request: the values
+that cannot be derived have to be measured, and measuring them once by hand
+does not make them repeatable. `telemetry.py` writes one record per cycle and
+`tools/fit_curves.py` reads it back into a suggested curve, reporting the
+figure that was never available before — how far a room **coasts after being
+stopped**, which is the difference between a cut-off that is right and one
+that is 0.4° too late. Without that record, the only way to get these numbers
+is to guess at them again.
 
 ---
 

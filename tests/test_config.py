@@ -58,6 +58,10 @@ def test_the_shipped_configuration_loads():
         "defaults.participation.rest_minutes",
         "defaults.participation.min_on_minutes",
         "defaults.participation.resume_deadband",
+        "operation.tick_seconds",
+        "operation.stale_after_minutes",
+        "telemetry.file",
+        "telemetry.max_mb",
     ],
 )
 def test_a_missing_value_is_an_error_not_a_hidden_default(path):
@@ -166,3 +170,29 @@ def test_a_room_may_override_the_duty_cycle():
     assert office.participation.rest(0.0).total_seconds() == 30 * 60
     assert living_room.participation.rest(0.0).total_seconds() == 5 * 60
     assert office.participation.cut_off(0.0) == 1.5, "unoverridden keys still inherit"
+
+
+def test_telemetry_flags_must_be_booleans():
+    with pytest.raises(ConfigError) as caught:
+        load(changed("telemetry.enabled", "yes"))
+    assert "'enabled' must be true or false" in str(caught.value)
+
+
+def test_a_telemetry_path_must_be_a_plain_filename():
+    """Writing anywhere other than the configuration directory is not ours to do."""
+    with pytest.raises(ConfigError) as caught:
+        load(changed("telemetry.file", "../../etc/passwd"))
+    assert "plain filename" in str(caught.value)
+
+
+def test_a_tick_that_would_hammer_the_state_machine_is_rejected():
+    with pytest.raises(ConfigError) as caught:
+        load(changed("operation.tick_seconds", 1))
+    assert "hammer" in str(caught.value)
+
+
+def test_shadow_mode_must_be_an_explicit_choice():
+    """Whether this thing touches the hardware is not a key to leave implicit."""
+    with pytest.raises(ConfigError) as caught:
+        load(without("operation.apply_to_hardware"))
+    assert "apply_to_hardware" in str(caught.value)

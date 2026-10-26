@@ -21,7 +21,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import timedelta
 
-from .model import Curve, ParticipationPolicy
+from .model import Curve, ParticipationPolicy, RoomConfig
 from .policy import PolicyConfig, participation_problems
 
 
@@ -46,6 +46,40 @@ class RoomSpec:
     participation: ParticipationPolicy
     priority: float
     schedule_entity: str | None
+
+    def as_room_config(self) -> RoomConfig:
+        """The planner's view of this room: where it is and how its unit behaves.
+
+        Entity ids deliberately do not cross this line. The planner has no
+        business knowing what a room is wired to.
+        """
+        return RoomConfig(room=self.key, group=self.group, participation=self.participation)
+
+
+@dataclass(frozen=True)
+class TelemetryConfig:
+    """Recording, so the measured numbers can be re-measured.
+
+    The participation curves and the inertia weight cannot be derived; they
+    have to be fitted to how this building actually behaves. Telemetry is the
+    difference between fitting them once, by hand, and being able to refit
+    them whenever the question comes up again.
+    """
+
+    enabled: bool
+    file: str
+    max_bytes: int
+    events: bool
+
+
+@dataclass(frozen=True)
+class OperationConfig:
+    """How the integration runs, as opposed to what it decides."""
+
+    apply_to_hardware: bool
+    tick: timedelta
+    write_interval: timedelta
+    stale_after: timedelta
 
 
 @dataclass(frozen=True)
@@ -72,6 +106,8 @@ class GroupSpec:
 @dataclass(frozen=True)
 class SystemConfig:
     outdoor_sensor: str
+    operation: OperationConfig
+    telemetry: TelemetryConfig
     intent: IntentConfig
     groups: tuple[GroupSpec, ...]
     rooms: tuple[RoomSpec, ...]
@@ -250,6 +286,40 @@ def load(raw: object) -> SystemConfig:
         "defaults.participation",
     )
 
+    raw_operation = reader.mapping(root.get("operation"), "operation")
+    apply_to_hardware = raw_operation.get("apply_to_hardware")
+    if not isinstance(apply_to_hardware, bool):
+        reader.fail("operation", f"'apply_to_hardware' must be true or false, found {apply_to_hardware!r}")
+        apply_to_hardware = False
+    operation = OperationConfig(
+        apply_to_hardware=apply_to_hardware,
+        tick=timedelta(seconds=reader.number(raw_operation, "tick_seconds", "operation")),
+        write_interval=timedelta(
+            seconds=reader.number(raw_operation, "write_interval_seconds", "operation")
+        ),
+        stale_after=timedelta(
+            minutes=reader.number(raw_operation, "stale_after_minutes", "operation")
+        ),
+    )
+    if operation.tick.total_seconds() < 5:
+        reader.fail("operation", "'tick_seconds' below 5 would hammer the state machine")
+
+    raw_telemetry = reader.mapping(root.get("telemetry"), "telemetry")
+    for flag in ("enabled", "events"):
+        if not isinstance(raw_telemetry.get(flag), bool):
+            reader.fail("telemetry", f"'{flag}' must be true or false, found {raw_telemetry.get(flag)!r}")
+    max_mb = reader.number(raw_telemetry, "max_mb", "telemetry")
+    if max_mb <= 0:
+        reader.fail("telemetry", "'max_mb' must be positive")
+    telemetry = TelemetryConfig(
+        enabled=bool(raw_telemetry.get("enabled")),
+        file=reader.text(raw_telemetry, "file", "telemetry"),
+        max_bytes=int(max(0.0, max_mb) * 1024 * 1024),
+        events=bool(raw_telemetry.get("events")),
+    )
+    if "/" in telemetry.file or telemetry.file.startswith("."):
+        reader.fail("telemetry", f"'file' must be a plain filename, found {telemetry.file!r}")
+
     raw_intent = reader.mapping(defaults.get("intent"), "defaults.intent")
     intent = IntentConfig(
         default_target=reader.number(raw_intent, "default_target", "defaults.intent"),
@@ -365,6 +435,8 @@ def load(raw: object) -> SystemConfig:
 
     return SystemConfig(
         outdoor_sensor=outdoor,
+        operation=operation,
+        telemetry=telemetry,
         intent=intent,
         groups=tuple(groups),
         rooms=tuple(rooms),

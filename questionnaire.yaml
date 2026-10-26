@@ -33,6 +33,116 @@ sections:
         target: outdoor_sensor
         answer: sensor.openweathermap_temperature
 
+  - title: Operation
+    questions:
+      - id: apply_to_hardware
+        ask: Should the integration command the units, or only publish what it would do?
+        why: >-
+          false is shadow mode: the plan is computed every tick and published
+          to the status sensors, but nothing is written to any unit. The
+          existing blueprints keep running the house, and every divergence
+          between what they did and what the planner would have done is either
+          a bug here or a behaviour of the old system nobody wrote down. Leave
+          this false until those divergences have been looked at; it is the
+          cheapest safety net in the project and the only one that costs
+          nothing to keep.
+        type: boolean
+        target: operation.apply_to_hardware
+        answer: false
+
+      - id: tick_seconds
+        ask: How often should the system re-evaluate everything?
+        why: >-
+          The reconciler is idempotent and rate-limited per unit, so a fast
+          tick costs little and makes the system quicker to correct a unit
+          that was changed at the wall. The per-unit rate limit, not this, is
+          what protects the compressor.
+        type: number
+        unit: seconds
+        target: operation.tick_seconds
+        answer: null
+        assume: 30
+
+      - id: write_interval_seconds
+        ask: At minimum, how long between two commands to the same unit?
+        why: >-
+          The per-unit rate limit. It keeps the reconciler clear of the
+          compressor's own anti-cycle lockout even if something upstream
+          changes its mind rapidly.
+        type: number
+        unit: seconds
+        target: operation.write_interval_seconds
+        answer: null
+        assume: 180
+
+      - id: stale_after_minutes
+        ask: After how long without an update is a temperature reading not to be trusted?
+        why: >-
+          A room with no trustworthy reading stands by and says so, rather
+          than guessing — a stale sensor otherwise produces a confident wrong
+          decision for the whole group. Battery sensors that report on change
+          need a generous value; a mains-powered one that reports every minute
+          does not.
+        type: number
+        unit: minutes
+        target: operation.stale_after_minutes
+        answer: null
+        assume: 30
+
+  - title: Telemetry
+    note: >-
+      The participation curves in HARVEST §C2 are the only numbers here that
+      must be measured rather than reasoned about, and inertia is the same.
+      Telemetry is what makes refitting them possible: one record per cycle
+      with target, measured, outdoor and the decision, which
+      tools/fit_curves.py turns back into a curve. Without it the numbers can
+      only ever be guessed at again.
+    questions:
+      - id: telemetry_enabled
+        ask: Should every cycle be recorded for later analysis?
+        why: >-
+          Writes one JSON object per cycle: outdoor temperature, and for each
+          room its target, measured temperature, what it wanted, what it was
+          told to do and why. This is the raw material for fitting the
+          overshoot curve and for replaying history against candidate inertia
+          values offline — which is possible precisely because the planner is
+          a pure function.
+        type: boolean
+        target: telemetry.enabled
+        answer: true
+
+      - id: telemetry_file
+        ask: What should the telemetry file be called?
+        why: >-
+          Relative to the Home Assistant configuration directory. One JSON
+          object per line, so it can be read incrementally and tailed.
+        type: text
+        target: telemetry.file
+        answer: multisplit-telemetry.jsonl
+
+      - id: telemetry_max_mb
+        ask: How large may the telemetry file grow before it is rotated?
+        why: >-
+          At one record every 30 seconds a season of data is tens of
+          megabytes. On rotation the current file is kept as .1 and a new one
+          started, so the most recent history always survives.
+        type: number
+        unit: megabytes
+        target: telemetry.max_mb
+        answer: null
+        assume: 25
+
+      - id: telemetry_events
+        ask: Should each cycle also be fired as a Home Assistant event?
+        why: >-
+          Fires multisplit_cycle, which automations and the logbook can react
+          to. Independent of the file: the file is for analysis, the event is
+          for reacting.
+        type: boolean
+        target: telemetry.events
+        answer: null
+        assume: true
+
   - title: Outdoor units and rooms
     questions:
       - id: groups
