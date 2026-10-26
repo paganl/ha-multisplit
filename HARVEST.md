@@ -201,12 +201,12 @@ cannot go below no matter what inertia is set to.
 
 | What | Value |
 | --- | --- |
-| Cooling lockout — no cooling below | 22 °C (confirm?) |
-| Heating lockout — no heating above | |
-| Allowed setpoint range (min / max) | |
+| Cooling lockout — no cooling below | 20 °C (confirm?) |
+| Heating lockout — no heating above | 24|
+| Allowed setpoint range (min / max) | 18/26|
 | Deadband (how far off target before a room wants anything) | |
-| Default target when no schedule applies | |
-| Away / unoccupied target | |
+| Default target when no schedule applies | 20|
+| Away / unoccupied target | 16|
 | Is there a seasonal lock today, or both modes year-round? | |
 
 ---
