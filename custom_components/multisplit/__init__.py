@@ -62,8 +62,19 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             "or generate it from questionnaire.yaml."
         ) from error
     except ConfigError as error:
-        # Not ConfigEntryNotReady: retrying will not fix a typo. Surface the
-        # whole list so it can be fixed in one pass.
+        # Log each problem as its own record before raising. A multi-line
+        # exception message is the first thing a log viewer collapses, and the
+        # list is the only useful part of it -- a count of four with the four
+        # lines missing tells nobody anything.
+        _LOGGER.error(
+            "multisplit: %s is not valid — %d problem(s):", path, len(error.problems)
+        )
+        for problem in error.problems:
+            _LOGGER.error("multisplit:   %s", problem)
+        if error.missing:
+            _LOGGER.error("multisplit: %s", ConfigError.STALE_HINT)
+
+        # Not ConfigEntryNotReady: retrying will not fix a typo.
         raise HomeAssistantError(f"{CONFIG_FILE} is not valid:\n{error}") from error
 
     coordinator = MultisplitCoordinator(hass, entry, config)
