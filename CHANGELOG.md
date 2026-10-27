@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.1.8 — 2026-10-27
+
+**Fixed**
+
+- `Unable to remove unknown job listener` on every reload. The deferred
+  startup check listened for `homeassistant_started` with a once-listener and
+  registered its unsubscribe as an unload callback. A once-listener removes
+  itself when it fires, so unloading afterwards asked Home Assistant to remove
+  a listener it no longer had.
+- The `via_device` deprecation introduced in 0.1.6. Linking a room's device to
+  its outdoor unit from an entity's `DeviceInfo` goes through a path Home
+  Assistant is removing in 2027.8. Both devices are now created during setup,
+  where the parent's registry id exists, and linked with `via_device_id`;
+  entities carry identifiers and nothing else.
+
 ## 0.1.7 — 2026-10-27
 
 **Added**

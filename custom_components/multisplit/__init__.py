@@ -24,6 +24,7 @@ from homeassistant.core import (
 )
 from homeassistant.exceptions import ConfigEntryNotReady, HomeAssistantError
 from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.event import async_call_later
 
 from . import measurement
@@ -37,6 +38,9 @@ from .const import (
     SERVICE_EXPLAIN,
     SERVICE_RELOAD,
     SERVICE_SET_ROOM_TARGET,
+    MANUFACTURER,
+    group_device_id,
+    room_device_id,
 )
 from .coordinator import MultisplitCoordinator
 from .core.config import ConfigError, SystemConfig
@@ -91,6 +95,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         # Not ConfigEntryNotReady: retrying will not fix a typo.
         raise HomeAssistantError(f"{CONFIG_FILE} is not valid:\n{error}") from error
 
+    _async_register_devices(hass, entry, config)
+
     coordinator = MultisplitCoordinator(hass, entry, config)
     await coordinator.async_config_entry_first_refresh()
     coordinator.async_watch_sources()
@@ -112,6 +118,39 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         )
 
     return True
+
+
+@callback
+def _async_register_devices(
+    hass: HomeAssistant, entry: ConfigEntry, config: SystemConfig
+) -> None:
+    """Create a device per outdoor unit, and one per room linked to it.
+
+    Done here rather than from each entity's ``DeviceInfo`` because linking a
+    device to its parent from an entity goes through ``via_device``, which
+    Home Assistant has deprecated in favour of ``via_device_id``. The id only
+    exists once the parent device has been created, which an entity cannot
+    guarantee and setup can.
+    """
+    registry = dr.async_get(hass)
+
+    for group in config.groups:
+        outdoor = registry.async_get_or_create(
+            config_entry_id=entry.entry_id,
+            identifiers={(DOMAIN, group_device_id(entry.entry_id, group.key))},
+            name=group.name,
+            manufacturer=MANUFACTURER,
+            model="Outdoor unit",
+        )
+        for room in config.rooms_in(group.key):
+            registry.async_get_or_create(
+                config_entry_id=entry.entry_id,
+                identifiers={(DOMAIN, room_device_id(entry.entry_id, room.key))},
+                name=room.name,
+                manufacturer=MANUFACTURER,
+                model="Indoor unit",
+                via_device_id=outdoor.id,
+            )
 
 
 @callback
@@ -157,16 +196,30 @@ def _async_check_entities_later(
             "; ".join(described),
         )
 
-    @callback
-    def _after_start(_event) -> None:
-        entry.async_on_unload(async_call_later(hass, grace, _check))
-
     if hass.state is CoreState.running:
         entry.async_on_unload(async_call_later(hass, grace, _check))
-    else:
-        entry.async_on_unload(
-            hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, _after_start)
-        )
+        return
+
+    started = False
+
+    @callback
+    def _after_start(_event) -> None:
+        nonlocal started
+        started = True
+        entry.async_on_unload(async_call_later(hass, grace, _check))
+
+    unsubscribe = hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, _after_start)
+
+    @callback
+    def _cancel_if_not_fired() -> None:
+        # A once-listener removes itself when it fires, so unsubscribing after
+        # that asks Home Assistant to remove a listener it no longer has --
+        # which it logs as "Unable to remove unknown job listener" on every
+        # reload.
+        if not started:
+            unsubscribe()
+
+    entry.async_on_unload(_cancel_if_not_fired)
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
