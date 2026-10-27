@@ -240,10 +240,38 @@ up in the right mode at the wrong temperature cannot be expressed.
 - [HARVEST.md](HARVEST.md) — the measured values, and what is still unanswered
 - [ARCHITECTURE.md](ARCHITECTURE.md) — review of the system this replaces
 
-## The card
+## Dashboard
 
-`multisplit-climate-card.js` is a Lovelace card from the previous iteration. It
-is not needed: with the thermostat offering only auto and off, the stock climate
-card no longer misrepresents anything. The card's remaining value is showing
-`reason` per room on one line, and it has not yet been rewritten against these
-entities.
+[dashboard.yaml](dashboard.yaml) is a complete view using built-in cards: a
+tile per room for control, a thermostat dial, a markdown card explaining every
+decision, and the outdoor units with their divergence counts.
+
+The one option worth knowing about is `state_content` on the tiles:
+
+```yaml
+state_content:
+  - hvac_action
+  - current_temperature
+```
+
+By default a climate tile shows its hvac **mode**, which here is always
+`auto` — deliberately, because a room cannot choose heating while the outdoor
+unit is cooling. What you want on the face of the card is `hvac_action`: what
+that room's unit is actually doing, which can honestly be `idle` while its
+group heats. That is the duty cycle resting the unit, and the markdown card
+says which case it is.
+
+## The old card
+
+`multisplit-climate-card.js` belongs to the system this replaces. Its mode
+request buttons call a script that no longer exists, so a request sits on
+"requested" for ever and can be neither cancelled nor reversed — it is waiting
+for an answer from something that has been deleted. There is nothing to
+request now: a room that wants the other mode accumulates weight until it
+wins.
+
+It is **not** installed by HACS, which only copies `custom_components/`, and it
+could not be: HACS treats a repository as one category, so a Lovelace card
+would need a repository of its own. If it is on your system it was copied to
+`config/www/` by hand. Remove the card from the dashboard, delete its entry
+under Settings → Dashboards → Resources, and delete the file.

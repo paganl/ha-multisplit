@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.1.10 — 2026-10-27
+
+**Added**
+
+- `dashboard.yaml` is now a complete view rather than loose cards: a tile per
+  room for control, a thermostat dial, the markdown card explaining every
+  decision, and the outdoor units with their divergence counts.
+
+  The tiles set `state_content: [hvac_action, current_temperature]`. A climate
+  tile shows its hvac *mode* by default, which here is always `auto` — so the
+  face of the card said nothing. `hvac_action` is what that room's unit is
+  actually doing, and it can honestly be `idle` while its group heats.
+
 ## 0.1.9 — 2026-10-27
 
 **Fixed**

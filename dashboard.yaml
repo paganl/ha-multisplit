@@ -1,74 +1,146 @@
 # A dashboard for the integration, using built-in cards only.
 #
-# The old multisplit-climate-card.js predates this integration: its mode
-# request buttons call a script that no longer exists, so it shows "COOL
-# requested / No response from the system" for ever. There is nothing to
-# request any more -- a room that wants the other mode accumulates weight
-# until it wins -- so remove that card rather than wiring it up.
+# Paste the `views:` entry below into Settings -> Dashboards -> your dashboard
+# -> Edit -> three dots -> Raw configuration editor, and change the entity ids
+# to your own. Developer Tools -> States will tell you what they are: either
+# climate.office or climate.group_b_office, depending on whether the
+# integration has been removed and re-added since 0.1.6.
 #
-# Settings -> Dashboards -> your dashboard -> Edit -> three dots -> Raw
-# configuration editor, then paste one of these cards.
+# The old multisplit-climate-card.js is not part of this. Its request buttons
+# call a script that no longer exists, so a request sits on "requested" for
+# ever and can be neither cancelled nor reversed. Remove it.
 
-# ---------------------------------------------------------------------------
-# Everything, with reasons. Finds the entities by their attributes, so it
-# works whether they are sensor.office_status or sensor.group_b_office_status.
-# ---------------------------------------------------------------------------
-type: markdown
-title: Climate
-content: |-
-  {% for group in states.sensor
-       | selectattr('attributes.scores', 'defined')
-       | sort(attribute='entity_id') %}
-  ### {{ group.name }} — **{{ group.state }}**
-  {{ group.attributes.reason }}
-  {%- set diverging = group.attributes.get('differences', []) %}
-  {%- if diverging %}
+views:
+  - title: Climate
+    path: climate
+    cards:
+      # -------------------------------------------------------------------
+      # Control. A tile per room.
+      #
+      # `state_content` is what makes these readable. By default a climate
+      # tile shows its hvac mode, which here is always "Auto" -- deliberately,
+      # because a room cannot choose heating while the outdoor unit is
+      # cooling. What you want to see is hvac_action: what the room's unit is
+      # actually doing right now, which can honestly be idle while the group
+      # heats. That is the duty cycle resting the unit, and the markdown card
+      # below says which case it is.
+      # -------------------------------------------------------------------
+      - type: grid
+        columns: 2
+        square: false
+        cards:
+          - type: tile
+            entity: climate.living_room
+            name: Living Room
+            state_content:
+              - hvac_action
+              - current_temperature
+            features:
+              - type: target-temperature
+          - type: tile
+            entity: climate.ischa
+            name: Ischa
+            state_content:
+              - hvac_action
+              - current_temperature
+            features:
+              - type: target-temperature
+          - type: tile
+            entity: climate.bedroom
+            name: Bedroom
+            state_content:
+              - hvac_action
+              - current_temperature
+            features:
+              - type: target-temperature
+          - type: tile
+            entity: climate.erin
+            name: Erin
+            state_content:
+              - hvac_action
+              - current_temperature
+            features:
+              - type: target-temperature
+          - type: tile
+            entity: climate.office
+            name: Office
+            state_content:
+              - hvac_action
+              - current_temperature
+            features:
+              - type: target-temperature
 
-  _Not set this way on the hardware: {{ diverging | join('; ') }}_
-  {%- endif %}
-  {% endfor %}
+      # -------------------------------------------------------------------
+      # One room in detail. The dial, with the mode toggle.
+      #
+      # The mode buttons offer auto and off only. Off is a real choice: it
+      # takes the room out of the plan entirely, so it stops asking for
+      # anything and stops counting towards its group's decision.
+      # -------------------------------------------------------------------
+      - type: thermostat
+        entity: climate.living_room
+        features:
+          - type: climate-hvac-modes
+            hvac_modes:
+              - auto
+              - "off"
 
-  ---
+      # -------------------------------------------------------------------
+      # Why. Finds the entities by their attributes, so it works whatever
+      # they are named.
+      # -------------------------------------------------------------------
+      - type: markdown
+        title: What the system is doing, and why
+        content: |-
+          {% for group in states.sensor
+               | selectattr('attributes.scores', 'defined')
+               | sort(attribute='entity_id') %}
+          ### {{ group.name }} — **{{ group.state }}**
+          {{ group.attributes.reason }}
+          {%- set diverging = group.attributes.get('differences', []) %}
+          {%- if diverging %}
 
-  {% for room in states.sensor
-       | selectattr('attributes.wants', 'defined')
-       | selectattr('attributes.participating', 'defined')
-       | sort(attribute='entity_id') -%}
-  {%- set measured = room.attributes.get('measured') -%}
-  {%- set target = room.attributes.get('target') -%}
-  **{{ room.name | replace(' Status', '') }}** — {{ room.state }}
-  {%- if measured is not none and target is not none %}
-   · {{ measured }}° → {{ target }}°
-  {%- endif %}
-  {%- set waiting = room.attributes.get('unserved_for_minutes', 0) %}
-  {%- if waiting and waiting > 1 %} · waiting {{ waiting | round }} min{% endif %}
+          _Not set this way on the hardware: {{ diverging | join('; ') }}_
+          {%- endif %}
+          {% endfor %}
 
-  {{ room.attributes.reason }}
+          ---
 
-  {% endfor %}
+          {% for room in states.sensor
+               | selectattr('attributes.wants', 'defined')
+               | selectattr('attributes.participating', 'defined')
+               | sort(attribute='entity_id') -%}
+          {%- set measured = room.attributes.get('measured') -%}
+          {%- set target = room.attributes.get('target') -%}
+          **{{ room.name | replace(' Status', '') }}** — {{ room.state }}
+          {%- if measured is not none and target is not none %}
+           · {{ measured }}° → {{ target }}°
+          {%- endif %}
+          {%- set waiting = room.attributes.get('unserved_for_minutes', 0) %}
+          {%- if waiting and waiting > 1 %} · waiting {{ waiting | round }} min{% endif %}
 
-# ---------------------------------------------------------------------------
-# One outdoor unit, as a plain entities card. Replace group_b with your own.
-# ---------------------------------------------------------------------------
-# type: entities
-# title: Group B
-# entities:
-#   - entity: sensor.group_b_mode
-#   - type: attribute
-#     entity: sensor.group_b_mode
-#     attribute: reason
-#     name: because
-#   - entity: sensor.group_b_divergence
-#     name: Units not set this way
-#   - entity: binary_sensor.group_b_heat_allowed
-#   - entity: binary_sensor.group_b_cool_allowed
+          {{ room.attributes.reason }}
 
-# ---------------------------------------------------------------------------
-# A room. The thermostat offers auto and off only, deliberately -- a room
-# cannot choose heating while the outdoor unit is cooling. What it is actually
-# doing is hvac_action, shown by the tile's state.
-# ---------------------------------------------------------------------------
-# type: tile
-# entity: climate.office
-# features:
-#   - type: target-temperature
+          {% endfor %}
+
+      # -------------------------------------------------------------------
+      # The outdoor units. Worth keeping while in shadow mode: divergence is
+      # how many units are not set the way the plan says, which is the whole
+      # output of running alongside the old automations.
+      # -------------------------------------------------------------------
+      - type: entities
+        title: Outdoor units
+        entities:
+          - entity: sensor.group_a_mode
+            name: Group A
+          - entity: sensor.group_a_divergence
+            name: Group A — units not set this way
+          - entity: binary_sensor.group_a_heat_allowed
+          - entity: binary_sensor.group_a_cool_allowed
+          - type: divider
+          - entity: sensor.group_b_mode
+            name: Group B
+          - entity: sensor.group_b_divergence
+            name: Group B — units not set this way
+          - entity: binary_sensor.group_b_heat_allowed
+          - entity: binary_sensor.group_b_cool_allowed
