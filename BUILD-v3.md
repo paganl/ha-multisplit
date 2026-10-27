@@ -66,7 +66,7 @@ state, starts no timers.
 | File | Owns | Notes |
 | --- | --- | --- |
 | `measurement.py` | which sensor is authoritative per room, averaging, staleness | a room with no trustworthy reading must produce `stale=True`, not a guess |
-| `intent.py` | resolving schedule → override → away → default into `RoomIntent` | overrides stored in integration storage with an expiry, not in helper entities |
+| `comfort.py` | resolving override → schedule → default into `RoomIntent`. Not `intent.py`: that name is reserved by Home Assistant's voice-intent platform | overrides stored in integration storage with an expiry, not in helper entities |
 | `reconciler.py` | **the only writes to hardware** | idempotent; mode + setpoint always in one `climate.set_temperature` call; per-unit rate limit |
 | `coordinator.py` | the tick: gather → plan → reconcile → publish | `DataUpdateCoordinator`, ~30 s interval, plus an immediate refresh on a source-sensor state change |
 

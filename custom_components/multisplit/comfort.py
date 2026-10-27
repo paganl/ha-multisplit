@@ -1,5 +1,14 @@
 """What each room should be, and why. Never how to achieve it.
 
+Named ``comfort`` rather than ``intent``, which is what the concern is called
+everywhere else in this project, because ``intent`` is a reserved platform
+name in Home Assistant: the voice-assistant intent component walks every
+loaded integration looking for a module of that name and calls
+``async_setup_intents`` on it. A module called ``intent.py`` here is picked up
+as a voice platform and raises AttributeError on every start. The types keep
+the project's vocabulary -- ``RoomIntent``, ``intent_source`` -- only the file
+is renamed.
+
 Resolution order, most specific first: an unexpired override, then the room's
 schedule, then the configured default. The source is carried through to the UI
 so a room can say *why* it is aiming at what it is aiming at -- "override

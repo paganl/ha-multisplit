@@ -78,7 +78,7 @@ async def async_get_config_entry_diagnostics(
             },
         },
         "now": coordinator.explain(),
-        "telemetry": coordinator.telemetry.summary(),
+        "telemetry": coordinator.telemetry_health,
         "observed_overshoot": {
             "samples": len(overshoot),
             "points": [{"outdoor": o, "overshoot": v} for o, v in overshoot[-200:]],

@@ -211,7 +211,7 @@ custom_components/multisplit/
     policy.py      what is permitted, and why not
     config.py      validated mapping → model
   measurement.py   which sensor to believe, and whether to
-  intent.py        override → schedule → default
+  comfort.py       override → schedule → default
   reconciler.py    the only writes to hardware
   coordinator.py   the tick: gather, plan, reconcile
   telemetry.py     one record per cycle, so the curves can be refitted

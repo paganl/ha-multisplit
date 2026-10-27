@@ -279,7 +279,8 @@ custom_components/multisplit/
     core/policy.py    Constraints from config + outdoor temperature
     core/config.py    validated mapping → model; no YAML library, no HA
     yaml_config.py    reads multisplit.yaml — the only use of a YAML parser
-    intent.py         schedule / override / presence resolution
+    comfort.py        schedule / override / presence resolution
+                      (not intent.py — reserved by Home Assistant)
     measurement.py    sensor selection, averaging, staleness
     reconciler.py     the only writer
     coordinator.py    gathers inputs, calls planner, hands plan to reconciler

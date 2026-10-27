@@ -43,6 +43,14 @@ class GroupModeSensor(MultisplitEntity, SensorEntity):
     _attr_icon = "mdi:hvac"
     _attr_translation_key = "group_mode"
 
+    # Scores and reasons change on almost every cycle. Recording them would
+    # write a database row per tick and, past 16 kB of attributes, Home
+    # Assistant stops storing them at all and warns about it. The state is
+    # worth keeping history for; the commentary is not.
+    _unrecorded_attributes = frozenset(
+        {"scores", "reason", "policy_reasons", "unserved", "rooms", "allowed_modes"}
+    )
+
     def __init__(self, coordinator: MultisplitCoordinator, group: str) -> None:
         super().__init__(coordinator, group)
         self._attr_unique_id = f"{coordinator.entry.entry_id}:{group}:mode"
@@ -77,6 +85,27 @@ class RoomStatusSensor(MultisplitEntity, SensorEntity):
 
     _attr_icon = "mdi:thermometer"
     _attr_translation_key = "room_status"
+
+    #: ``measured`` moves continuously and ``reason`` is prose, so recording
+    #: either turns a status sensor that changes a few times an hour into one
+    #: database row per tick. The overshoot sensor is the one built for
+    #: history.
+    _unrecorded_attributes = frozenset(
+        {
+            "reason",
+            "measured",
+            "measured_from",
+            "stale",
+            "target",
+            "wants",
+            "unserved_for_minutes",
+            "override_until",
+            "climate_entity",
+            "group",
+            "intent_source",
+            "participating",
+        }
+    )
 
     def __init__(self, coordinator: MultisplitCoordinator, room: str) -> None:
         spec = next(r for r in coordinator.config.rooms if r.key == room)
@@ -177,6 +206,19 @@ class GroupDivergenceSensor(MultisplitEntity, SensorEntity):
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_icon = "mdi:not-equal-variant"
 
+    #: The count is worth history. The lists behind it are not, and they are
+    #: the part that could grow.
+    _unrecorded_attributes = frozenset(
+        {
+            "differences",
+            "last_actions",
+            "telemetry_records",
+            "telemetry_queued",
+            "telemetry_dropped",
+            "telemetry_error",
+        }
+    )
+
     def __init__(self, coordinator: MultisplitCoordinator, group: str) -> None:
         super().__init__(coordinator, group)
         self._attr_unique_id = f"{coordinator.entry.entry_id}:{group}:divergence"
@@ -194,11 +236,13 @@ class GroupDivergenceSensor(MultisplitEntity, SensorEntity):
 
     @property
     def extra_state_attributes(self) -> dict:
-        telemetry = self.coordinator.telemetry.summary()
+        telemetry = self.coordinator.telemetry_health
         return {
             "differences": self._lines(),
             "applying": self.coordinator.config.operation.apply_to_hardware,
             "last_actions": list(self.coordinator.actions),
             "telemetry_records": telemetry["records_written"],
+            "telemetry_queued": telemetry["queued"],
+            "telemetry_dropped": telemetry["dropped"],
             "telemetry_error": telemetry["last_error"],
         }

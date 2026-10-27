@@ -48,7 +48,7 @@ jobs:
           import importlib, sys
           sys.path.insert(0, ".")
           for module in (
-              "const", "generate", "yaml_config", "entity", "measurement", "intent",
+              "const", "generate", "yaml_config", "entity", "measurement", "comfort",
               "reconciler", "telemetry", "diagnostics", "coordinator", "config_flow",
               "sensor", "binary_sensor", "climate", "__init__",
           ):

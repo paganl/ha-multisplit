@@ -32,6 +32,8 @@ async def async_setup_entry(
 class ModeAllowedSensor(MultisplitEntity, BinarySensorEntity):
     """Is this mode available on this outdoor unit at the moment?"""
 
+    _unrecorded_attributes = frozenset({"reason", "outdoor_unknown"})
+
     def __init__(self, coordinator: MultisplitCoordinator, group: str, mode: str) -> None:
         super().__init__(coordinator, group)
         self._mode = mode

@@ -172,6 +172,16 @@ class Telemetry:
             return True
         return elapsed >= self._config.heartbeat
 
+    def write_many(self, records: list[dict]) -> None:
+        """Append several records in one trip to the disk.
+
+        Called from an executor thread. Buffering and writing in batches is
+        not about throughput -- it is so that a busy or starved executor pool
+        delays the *record* rather than the control loop that produced it.
+        """
+        for record in records:
+            self.write(record)
+
     def write(self, record: dict) -> None:
         """Append one line. Called in an executor -- this touches the disk.
 

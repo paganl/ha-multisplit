@@ -18,18 +18,22 @@ from homeassistant.helpers.event import async_track_state_change_event
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from homeassistant.util import dt as dt_util
 
-from . import intent as intent_module
+from . import comfort
 from . import measurement
 from .const import DOMAIN
 from .core.config import SystemConfig
 from .core.model import Constraints, GroupState, Plan, RoomRuntime
 from .core.planner import plan as make_plan
 from .core.policy import constraints_for
-from .intent import Override
+from .comfort import Override
 from .reconciler import Reconciler
 from .telemetry import EVENT_CYCLE, Telemetry, record_for
 
 _LOGGER = logging.getLogger(__name__)
+
+#: Cycles held in memory waiting to be written. At a 30 second tick this is
+#: over an hour of backlog, which is far longer than any plausible stall.
+_MAX_BUFFERED = 240
 
 
 class MultisplitCoordinator(DataUpdateCoordinator[Plan]):
@@ -58,6 +62,15 @@ class MultisplitCoordinator(DataUpdateCoordinator[Plan]):
         }
         self._allowed_previously: dict[str, frozenset[str]] = {}
         self._constraints: dict[str, Constraints] = {}
+
+        # Telemetry is written off the control loop. Home Assistant's executor
+        # pool is shared, and one badly behaved integration can occupy every
+        # worker for a minute at a time -- seen in the wild with an nmap-based
+        # scanner holding all twenty. Awaiting a file write inside the cycle
+        # would make the thermostat's responsiveness depend on that.
+        self._to_write: list[dict] = []
+        self._writing = False
+        self._dropped = 0
 
     # ------------------------------------------------------------------
     # Watching the inputs
@@ -106,13 +119,13 @@ class MultisplitCoordinator(DataUpdateCoordinator[Plan]):
     async def _async_update_data(self) -> Plan:
         now = dt_util.utcnow()
 
-        for room in intent_module.expired(self.overrides, now):
+        for room in comfort.expired(self.overrides, now):
             _LOGGER.debug("multisplit: override for %s expired", room)
             self.overrides.pop(room, None)
 
         outdoor = measurement.read_outdoor(self.hass, self.config)
         measurements = measurement.collect(self.hass, self.config, now)
-        intents = intent_module.resolve(self.hass, self.config, self.overrides, now)
+        intents = comfort.resolve(self.hass, self.config, self.overrides, now)
 
         self._constraints = {
             group.key: constraints_for(
@@ -177,10 +190,47 @@ class MultisplitCoordinator(DataUpdateCoordinator[Plan]):
         self.telemetry.remember(record)
 
         if self.config.telemetry.enabled:
-            await self.hass.async_add_executor_job(self.telemetry.write, record)
+            self._queue(record)
 
         if self.config.telemetry.events:
             self.hass.bus.async_fire(EVENT_CYCLE, record)
+
+    @callback
+    def _queue(self, record: dict) -> None:
+        """Hand the record to a background writer, never to this cycle."""
+        self._to_write.append(record)
+        if len(self._to_write) > _MAX_BUFFERED:
+            # Bounded: a disk that never comes back must not become a memory
+            # leak. The count is surfaced in diagnostics so the loss is
+            # visible rather than silent.
+            dropped = len(self._to_write) - _MAX_BUFFERED
+            del self._to_write[:dropped]
+            self._dropped += dropped
+
+        if self._writing:
+            return
+        self._writing = True
+        self.hass.async_create_background_task(
+            self._async_flush(), name="multisplit telemetry flush"
+        )
+
+    async def _async_flush(self) -> None:
+        try:
+            while self._to_write:
+                batch, self._to_write = self._to_write, []
+                await self.hass.async_add_executor_job(
+                    self.telemetry.write_many, batch
+                )
+        finally:
+            self._writing = False
+
+    @property
+    def telemetry_health(self) -> dict:
+        return {
+            **self.telemetry.summary(),
+            "queued": len(self._to_write),
+            "dropped": self._dropped,
+        }
 
     # ------------------------------------------------------------------
     # Services reach in here

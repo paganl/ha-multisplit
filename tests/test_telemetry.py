@@ -306,3 +306,48 @@ def test_the_fitting_tool_says_so_when_there_is_nothing_to_fit(capsys):
 def test_the_fitting_tool_can_restrict_to_one_room():
     assert fit_curves.extract(stop_cycle_records(), "bedroom") == []
     assert len(fit_curves.extract(stop_cycle_records(), "living_room")) == 1
+
+
+def test_a_batch_is_written_in_one_pass(tmp_path):
+    """Batching is how a blocked executor delays the record, not the cycle."""
+    telemetry = Telemetry(every_tick(CONFIG.telemetry), tmp_path)
+    batch = [
+        cycle(at=NOW + timedelta(minutes=n), outdoor=7.0, measured=21.0, target=21.0, mode=HEAT)
+        for n in range(5)
+    ]
+    telemetry.write_many(batch)
+
+    assert telemetry.written == 5
+    assert len(telemetry.path.read_text(encoding="utf-8").strip().splitlines()) == 5
+
+
+def test_a_batch_still_honours_change_triggering(tmp_path):
+    telemetry = Telemetry(CONFIG.telemetry, tmp_path)
+    telemetry.write_many(
+        [
+            cycle(at=NOW + timedelta(seconds=30 * n), outdoor=7.0, measured=21.0, target=21.0, mode=HEAT)
+            for n in range(5)
+        ]
+    )
+    assert telemetry.written == 1
+    assert telemetry.skipped == 4
+
+
+def test_a_failing_batch_does_not_lose_the_rest(tmp_path):
+    """One unwritable record must not discard the ones after it."""
+    telemetry = Telemetry(every_tick(CONFIG.telemetry), tmp_path)
+    telemetry.write(cycle(at=NOW, outdoor=7.0, measured=21.0, target=21.0, mode=HEAT))
+
+    # Make the path a directory so the next open fails, then restore it.
+    telemetry.path.unlink()
+    telemetry.path.mkdir()
+    telemetry.write_many(
+        [cycle(at=NOW + timedelta(minutes=1), outdoor=7.0, measured=21.0, target=21.0, mode=HEAT)]
+    )
+    assert telemetry.last_error is not None
+
+    telemetry.path.rmdir()
+    telemetry.write_many(
+        [cycle(at=NOW + timedelta(minutes=2), outdoor=7.0, measured=22.0, target=21.0, mode=HEAT)]
+    )
+    assert telemetry.last_error is None, "it recovers once the path is writable again"

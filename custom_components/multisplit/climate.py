@@ -54,6 +54,9 @@ class RoomClimate(MultisplitEntity, ClimateEntity):
         | ClimateEntityFeature.TURN_OFF
     )
     _attr_target_temperature_step = 0.5
+    _unrecorded_attributes = frozenset(
+        {"reason", "wants", "group", "group_mode", "group_reason"}
+    )
 
     def __init__(self, coordinator: MultisplitCoordinator, room: str) -> None:
         spec = next(r for r in coordinator.config.rooms if r.key == room)
