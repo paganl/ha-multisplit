@@ -266,12 +266,28 @@ class MultisplitOptionsFlow(OptionsFlow):
 
 
 def _as_default(value: Any, kind: str) -> Any:
-    """Render a current answer as something a form field can hold."""
+    """Render a current answer as something a form field can hold.
+
+    The YAML styles are chosen per type because a form field is read by a
+    person: a list of rooms wants a line each, while a curve point wants to
+    stay on one line as the [outdoor, value] pair it is. Flow style for
+    everything put the whole group and room list on a single unreadable line.
+    """
     if kind == "boolean":
         return bool(value)
     if kind == "choice":
         return str(value)
-    if kind in _YAML_TYPES:
+    if kind == "records":
+        # Block style: one entry per line group, as it appears in the file.
+        return yaml.safe_dump(
+            value, default_flow_style=False, sort_keys=False, allow_unicode=True
+        ).strip()
+    if kind == "curve":
+        # Block list, but each point inline: "- [7.0, 15]".
+        return yaml.safe_dump(
+            value, default_flow_style=None, sort_keys=False, allow_unicode=True
+        ).strip()
+    if kind == "pair":
         return yaml.safe_dump(value, default_flow_style=True).strip()
     if value is None:
         return "null"

@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.1.4 — 2026-10-27
+
+**Fixed**
+
+- Reconfiguring the groups or rooms section corrupted its own answer.
+  Validating a `records` answer returned the shape the *configuration* wants
+  — entries keyed by id — and that was written back into
+  `questionnaire.yaml` as the answer. It is not a valid answer, so the field
+  showed the wrong thing and the next edit of that section failed with
+  "expected a non-empty list of entries". Checking an answer and
+  transforming it are now separate: `validate` keeps the authored list,
+  `to_config` keys it for the generated file.
+- A questionnaire already damaged by that bug repairs itself: a keyed mapping
+  where a list belongs is accepted and normalised on read.
+- Group and room fields in the reconfigure form were rendered as one long
+  line of inline YAML. They are now block style, one entry per line group,
+  while curve points stay inline as the `[outdoor, value]` pairs they are.
+
 ## 0.1.3 — 2026-10-27
 
 **Fixed**

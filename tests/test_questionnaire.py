@@ -157,3 +157,62 @@ def test_a_duplicate_room_key_is_refused():
     question = {"id": "rooms", "type": "records", "key_field": "key"}
     with pytest.raises(generate.AnswerError, match="duplicate"):
         generate.validate(question, [{"key": "office"}, {"key": "office"}])
+
+
+# --------------------------------------------------------------------------
+# Reconfiguring must not corrupt the answer it just read
+# --------------------------------------------------------------------------
+
+
+def records_question(question_id):
+    return next(q for q in questions() if q["id"] == question_id)
+
+
+@pytest.mark.parametrize("question_id", ["groups", "rooms"])
+def test_a_record_answer_round_trips_through_validation(question_id):
+    """The reconfigure bug: validating an answer returned the *configuration's*
+    shape, which was written back as the answer and was not a valid answer, so
+    the next edit of that section failed and showed the wrong thing."""
+    question = records_question(question_id)
+    once = generate.validate(question, question["answer"])
+    twice = generate.validate(question, once)
+    assert once == twice == question["answer"]
+
+
+@pytest.mark.parametrize("question_id", ["groups", "rooms"])
+def test_validation_keeps_the_authored_shape_and_to_config_keys_it(question_id):
+    question = records_question(question_id)
+    answer = generate.validate(question, question["answer"])
+    assert isinstance(answer, list), "the questionnaire lists entries"
+
+    config = generate.to_config(question, answer)
+    assert isinstance(config, dict), "the configuration keys them"
+    assert set(config) == {record["key"] for record in answer}
+    assert all("key" not in body for body in config.values()), (
+        "the key becomes the mapping key, not a field inside it"
+    )
+
+
+def test_a_questionnaire_damaged_by_that_bug_repairs_itself():
+    """A keyed mapping where a list belongs is accepted and normalised, so a
+    file already written by the broken version reads correctly."""
+    question = records_question("groups")
+    damaged = {"a": {"name": "Group A"}, "b": {"name": "Group B"}}
+    assert generate.validate(question, damaged) == question["answer"]
+
+
+def test_a_record_entry_still_needs_its_key():
+    question = records_question("groups")
+    with pytest.raises(generate.AnswerError, match="needs a 'key'"):
+        generate.validate(question, [{"name": "Group A"}])
+
+
+def test_to_config_leaves_every_other_type_alone():
+    for question in questions():
+        if question["type"] == "records":
+            continue
+        answer = question.get("answer", question.get("assume"))
+        if answer is None:
+            continue
+        validated = generate.validate(question, answer)
+        assert generate.to_config(question, validated) is validated

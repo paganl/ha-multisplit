@@ -115,24 +115,65 @@ def validate(question: dict, value: Any) -> Any:
         return points
 
     if kind == "records":
-        if not isinstance(value, list) or not value:
-            raise AnswerError(f"{where}: expected a non-empty list of entries")
-        field = question["key_field"]
-        out: dict[str, dict] = {}
-        for record in value:
-            if not isinstance(record, dict) or field not in record:
-                raise AnswerError(f"{where}: every entry needs a '{field}', got {record!r}")
-            key = record[field]
-            if key in out:
-                raise AnswerError(f"{where}: duplicate {field} {key!r}")
-            out[key] = {
-                k: (Flow(v) if isinstance(v, list) else v)
-                for k, v in record.items()
-                if k != field
-            }
-        return out
+        return _records(question, value, where)
 
     raise AnswerError(f"{where}: unknown question type {kind!r}")
+
+
+def _records(question: dict, value: Any, where: str) -> list[dict]:
+    """A list of entries, each carrying a key field.
+
+    Returns the answer in the form it is *authored* in, not the form the
+    configuration wants. Those were the same function once, and the result was
+    that reconfiguring through the UI wrote the configuration's shape back
+    into the questionnaire as the answer -- which is not a valid answer, so
+    the next edit of that section failed and the field showed the wrong thing.
+    Checking an answer and transforming it are different jobs; `to_config`
+    does the second.
+
+    A mapping is accepted as well as a list, and normalised, so a
+    questionnaire already damaged by that bug repairs itself on the next read.
+    """
+    field = question["key_field"]
+
+    if isinstance(value, dict):
+        value = [{field: key, **(body or {})} for key, body in value.items()]
+
+    if not isinstance(value, list) or not value:
+        raise AnswerError(f"{where}: expected a non-empty list of entries")
+
+    seen: set[str] = set()
+    records: list[dict] = []
+    for record in value:
+        if not isinstance(record, dict) or field not in record:
+            raise AnswerError(f"{where}: every entry needs a '{field}', got {record!r}")
+        key = record[field]
+        if key in seen:
+            raise AnswerError(f"{where}: duplicate {field} {key!r}")
+        seen.add(key)
+        records.append(dict(record))
+    return records
+
+
+def to_config(question: dict, answer: Any) -> Any:
+    """The answer in the shape the generated configuration wants.
+
+    Only `records` differs: the questionnaire lists entries so each one reads
+    as a unit, while the configuration keys them so the loader can look one
+    up. Everything else is already in its final form.
+    """
+    if question.get("type") != "records":
+        return answer
+
+    field = question["key_field"]
+    return {
+        record[field]: {
+            key: (Flow(value) if isinstance(value, list) else value)
+            for key, value in record.items()
+            if key != field
+        }
+        for record in answer
+    }
 
 
 # --------------------------------------------------------------------------
@@ -176,7 +217,7 @@ def build(questionnaire: dict) -> tuple[Node, list[str], list[str]]:
             else:
                 marked = False
 
-            value = validate(question, answer)
+            value = to_config(question, validate(question, answer))
 
             node = root.at(question["target"].split("."))
             node.leaf = True
