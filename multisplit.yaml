@@ -149,10 +149,11 @@ defaults:
     # working hardest, so a nearly-satisfied room overshoots by design.
     #
     # How far past target did you let a room go before powering the unit off?
-    # The overshoot the duty cycle deliberately tolerates. Measured as a
-    # constant here -- it did not vary with outdoor temperature. Entered as a
-    # curve of [outdoor °C, degrees past target] so it can vary later if a
-    # measurement ever says it should; one point is a flat line.
+    # The overshoot the duty cycle deliberately tolerates. Confirmed as a
+    # constant: in this building it did not vary with outdoor temperature,
+    # which is the opposite of what the design first assumed. Entered as a
+    # curve of [outdoor °C, degrees past target] anyway, so it can vary later
+    # if tools/fit_curves.py ever says it should; one point is a flat line.
     # Units: degrees past target.
     cut_off_offset:
     - [0.0, 1.5]
@@ -210,11 +211,9 @@ defaults:
     # What is the lowest and highest target temperature anyone may set?
     # Clamps every target, however it arrives -- including the away setback
     # below, which is why the loader refuses a range that would clamp it.
-    # NOTE: HARVEST §E says 18/26, but the away target of 16 would then be
-    # unreachable: it would be clamped to 18 and the setback would silently
-    # never take effect. Lowered to 16 here so the away target works. Confirm
-    # which of the two is right -- a minimum of 18 with an away target of 18,
-    # or a minimum of 16 as set here.
+    # First given as 18-26, which could not hold alongside a 16 degree away
+    # target: the setback would have been clamped up to 18 and silently never
+    # taken effect. Settled at 16-26 so the setback does what it says.
     # Units: °C.
     setpoint_range: [16.0, 26.0]
     # How far from target before a room counts as wanting something?

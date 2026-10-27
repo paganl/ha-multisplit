@@ -78,10 +78,16 @@ order — `measurement.py` takes the first one that isn't stale.
 >    *some* temperature, and if four rooms use a biased one the duty cycle
 >    inherits that bias. Worth checking whether a room sensor exists under
 >    another name before accepting the fallback.
-> 2. `climate.mitsubishi_ac_ischa_mitsubishi_ac_ischa_climat` ends in
->    `climat`, where the other four end in `climate`. Probably a typo, but it
->    could be a genuinely truncated entity id — worth pasting from Developer
->    Tools → States rather than assuming either way.
+> 2. **Still open, and left exactly as given.**
+>    `climate.mitsubishi_ac_ischa_mitsubishi_ac_ischa_climat` ends in
+>    `climat`, where the other four end in `climate`. Not corrected, because
+>    guessing at an entity id is how a room silently stops being controlled:
+>    if the truncated form is the real one, "fixing" it breaks that room and
+>    the failure looks like a hardware fault.
+>
+>    It does not need answering by hand. The integration logs a warning at
+>    startup naming every configured entity that does not exist, so the first
+>    run says which spelling is real.
 
 **Outdoor temperature source:** `sensor.openweathermap_temperature`
 
@@ -160,8 +166,9 @@ temperature". This is the part worth the most care.
 | Mild (around 7 °C) | 1.5 (constant) | 15 min | |
 | Shoulder (around 12–14 °C) | 1.5 (constant) | 25 min | |
 
-> **Re-read, needs confirming.** The numbers 5 / 15 / 25 were entered in the
-> cut-off column but have been taken as **minutes of rest period**, because:
+> **Confirmed 2026-10-27.** The numbers 5 / 15 / 25 were entered in the
+> cut-off column and are **minutes of rest period**. The reasoning that led
+> to reading them that way:
 > five to twenty-five *degrees* past target is not physical; §C1 already gives
 > a single cut-off of 1.5 °C with no outdoor dependence; and the original
 > description was "powered the unit off after a period of time ... based on
@@ -170,9 +177,14 @@ temperature". This is the part worth the most care.
 > temperature also matches the physics: an overshot room coasts for longer in
 > mild weather.
 >
-> So the mechanism is read as: **fixed 1.5 °C overshoot, variable rest.** If
-> that is wrong, say so — it is the single most load-bearing assumption in the
-> calibration, and it is encoded in `core/measured.py`.
+> So the mechanism is: **fixed 1.5 °C overshoot, variable rest.** Encoded in
+> `questionnaire.yaml` under the duty cycle, as a flat `cut_off_offset` curve
+> and a sloping `rest_minutes` one.
+>
+> Note what this settles beyond the numbers: the cut-off is *not* a function
+> of outdoor temperature in this building. The design had assumed it would be,
+> and that assumption is withdrawn — see DESIGN-v3.md §4. The rest period is
+> the part that varies, and the field data supports that directly.
 
 If it was a formula rather than a table, write the formula. If it was a single
 threshold with a separate outdoor-temperature *condition* gating it (below X,
@@ -238,18 +250,20 @@ cannot go below no matter what inertia is set to.
 | --- | --- |
 | Cooling lockout — no cooling below | 20 °C (confirm?) |
 | Heating lockout — no heating above | 24|
-| Allowed setpoint range (min / max) | 18/26|
+| Allowed setpoint range (min / max) | 16/26 (was 18/26 — see below) |
 | Deadband (how far off target before a room wants anything) | |
 | Default target when no schedule applies | 20|
 | Away / unoccupied target | 16|
 | Is there a seasonal lock today, or both modes year-round? | |
 
-> **One conflict to resolve.** A setpoint range of 18–26 with an away target
-> of 16 cannot both hold: 16 would be clamped up to 18, and the setback would
-> silently never take effect — which looks exactly like a broken schedule. The
-> questionnaire currently lowers the range to **16–26** so the away target
-> works. Say which you meant: a minimum of 18 with an away target of 18, or
-> the minimum of 16 as it now stands.
+> **Resolved 2026-10-27: the range is 16–26.** It was first given as 18–26,
+> which could not hold alongside an away target of 16: the setback would have
+> been clamped up to 18 and silently never taken effect — indistinguishable,
+> from the outside, from a broken schedule. The range was lowered rather than
+> the setback raised, so the 16 °C setback does what it says.
+>
+> The loader now refuses any configuration where a comfort target falls
+> outside the setpoint range, so this conflict cannot be reintroduced quietly.
 >
 > The lockout pair is consistent: no cooling below 20, no heating above 24, so
 > between 20 and 24 both are available and arbitration decides. The loader

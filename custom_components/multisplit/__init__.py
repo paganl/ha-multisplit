@@ -17,6 +17,7 @@ from homeassistant.core import HomeAssistant, ServiceCall, ServiceResponse, Supp
 from homeassistant.exceptions import ConfigEntryNotReady, HomeAssistantError
 from homeassistant.helpers import config_validation as cv
 
+from . import measurement
 from .const import (
     ATTR_ROOM,
     ATTR_UNTIL,
@@ -75,6 +76,20 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     entry.async_on_unload(entry.add_update_listener(_async_reload_entry))
 
     _async_register_services(hass)
+
+    missing = measurement.unavailable_entities(hass, config)
+    if missing:
+        # Named rather than guessed at. A configured entity that does not
+        # exist is the one failure mode that looks like a hardware fault from
+        # the outside, so say it out loud on the way up.
+        _LOGGER.warning(
+            "multisplit: %d configured entit%s do not exist and will be "
+            "treated as having no reading: %s. Check the spelling in "
+            "Developer Tools → States.",
+            len(missing),
+            "y" if len(missing) == 1 else "ies",
+            ", ".join(missing),
+        )
 
     if not config.operation.apply_to_hardware:
         _LOGGER.warning(

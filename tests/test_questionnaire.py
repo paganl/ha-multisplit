@@ -79,6 +79,34 @@ def test_the_harvested_values_are_not_assumptions():
     assert answered["outdoor_sensor"] == "sensor.openweathermap_temperature"
 
 
+def test_every_question_declares_its_type():
+    """A question with no type falls back to "number", which is wrong for most.
+
+    Added after an edit dropped `type: pair` from the setpoint range: the
+    generator rejected it loudly, which is the right failure, but a question
+    missing its type should not get as far as the generator.
+    """
+    known = {
+        "number", "number_or_null", "boolean", "text", "entity",
+        "choice", "pair", "curve", "records",
+    }
+    for question in questions():
+        assert "type" in question, f"{question['id']} declares no type"
+        assert question["type"] in known, f"{question['id']}: unknown type {question['type']!r}"
+        if question["type"] == "entity":
+            assert "domain" in question, f"{question['id']} needs a domain"
+        if question["type"] == "choice":
+            assert question.get("options"), f"{question['id']} needs options"
+        if question["type"] == "records":
+            assert question.get("key_field"), f"{question['id']} needs a key_field"
+
+
+def test_every_target_is_unique():
+    """Two questions writing the same key would silently fight each other."""
+    targets = [q["target"] for q in questions()]
+    assert len(targets) == len(set(targets))
+
+
 def test_every_question_explains_what_the_number_does():
     for question in questions():
         assert question.get("why"), f"{question['id']} has no explanation"
