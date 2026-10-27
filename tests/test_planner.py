@@ -434,3 +434,58 @@ def test_overshoot_regression_from_the_field():
     running = {"office": RoomRuntime("office", running=True, mode=HEAT, since=NOW - timedelta(minutes=20))}
     result = run(configs("office"), {"office": 20.9}, {"office": 21.0}, outdoor=12.0, runtime=running)
     assert result.room("office").standing_by
+
+
+def test_a_room_that_has_never_run_is_not_made_to_rest():
+    """The post-restart bug, from a live instance.
+
+    At startup the climate entities are not registered yet, so the first
+    cycles see no temperature and every room stands by. Stamping the
+    participation clock on those cycles made each room look as though it had
+    just stopped, so when readings arrived it had to sit out a full rest —
+    25 minutes in mild weather — before it could heat. After every restart.
+    """
+    blind = {"office": RoomMeasurement("office", None, stale=True, source="missing")}
+    first = plan(
+        rooms=configs("office"),
+        measurements=blind,
+        intents={"office": RoomIntent("office", 23.5)},
+        constraints={"a": Constraints()},
+        runtime={},
+        group_state={"a": GroupState("a")},
+        outdoor=13.0,
+        now=NOW,
+    )
+    remembered = {r.room: r for r in first.runtime}
+    assert remembered["office"].since is None, "no transition has happened yet"
+
+    arrived = run(
+        configs("office"),
+        {"office": 22.5},
+        {"office": 23.5},
+        outdoor=13.0,
+        runtime=remembered,
+        now=NOW + timedelta(seconds=30),
+    )
+    assert arrived.room("office").mode == HEAT, "it should heat, not serve a rest it never earned"
+
+
+def test_stopping_does_start_the_rest_clock():
+    """The other half: a room that genuinely stops must rest."""
+    running = {"office": RoomRuntime("office", running=True, mode=HEAT, since=NOW - timedelta(hours=1))}
+    stopped = run(
+        configs("office"), {"office": 22.6}, {"office": 21.0}, outdoor=13.0, runtime=running
+    )
+    assert stopped.room("office").standing_by
+    remembered = {r.room: r for r in stopped.runtime}
+    assert remembered["office"].since == NOW, "the transition restarts the clock"
+
+    too_soon = run(
+        configs("office"),
+        {"office": 20.0},
+        {"office": 21.0},
+        outdoor=13.0,
+        runtime=remembered,
+        now=NOW + timedelta(minutes=5),
+    )
+    assert "resting" in too_soon.room("office").because

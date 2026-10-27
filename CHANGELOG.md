@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.1.6 — 2026-10-27
+
+**Fixed**
+
+- **A room that had never run was made to serve a rest period.** At startup
+  the climate entities are not registered yet, so the first cycles see no
+  temperature and every room stands by. The planner stamped the participation
+  clock on those cycles, so when readings arrived each room looked as though
+  it had just stopped and had to sit out a full rest — 25 minutes in mild
+  weather — before it could heat. After every restart. `since` is now set
+  only by a real transition, which is what `RoomRuntime.elapsed` already
+  assumed.
+
+**Changed**
+
+- **Each room is its own device**, linked to its outdoor unit with
+  `via_device`, instead of every room entity hanging off the compressor it
+  shares. `climate.group_b_office` becomes `climate.office`, and
+  `sensor.group_a_living_room_status` becomes `sensor.living_room_status`.
+  Home Assistant still shows the rooms nested under the unit that constrains
+  them, which is the relationship worth modelling — it just stops putting the
+  unit's name in every room's id.
+
+  Home Assistant keeps an entity id once assigned, so an existing install
+  keeps its old ids. To pick up the new ones, delete the integration from
+  Settings → Devices & services and add it again; nothing is lost, because
+  all configuration lives in `multisplit.yaml`.
+
 ## 0.1.5 — 2026-10-27
 
 **Fixed**

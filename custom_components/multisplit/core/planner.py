@@ -442,7 +442,13 @@ def plan(
                     was,
                     running=running,
                     mode=mode,
-                    since=now if changed or was.since is None else was.since,
+                    # Only a real transition restarts the clock. A room that
+                    # has never run has `since` of None, which `elapsed` reads
+                    # as "no transition yet" -- stamping it here instead meant
+                    # a room that had merely been seen standing by, with no
+                    # sensor data, was treated as having just stopped, and had
+                    # to sit out a full rest before it could ever heat.
+                    since=now if changed else was.since,
                     unserved_since=(was.unserved_since or now) if starved else None,
                 )
             )

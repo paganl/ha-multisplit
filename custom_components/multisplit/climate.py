@@ -33,7 +33,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from .const import DOMAIN
 from .coordinator import MultisplitCoordinator
 from .core.model import HEAT
-from .entity import MultisplitEntity
+from .entity import MultisplitRoomEntity
 
 
 async def async_setup_entry(
@@ -43,7 +43,7 @@ async def async_setup_entry(
     async_add_entities(RoomClimate(coordinator, room.key) for room in coordinator.config.rooms)
 
 
-class RoomClimate(MultisplitEntity, ClimateEntity):
+class RoomClimate(MultisplitRoomEntity, ClimateEntity):
     """A room's comfort intent, not a unit's control panel."""
 
     _attr_temperature_unit = UnitOfTemperature.CELSIUS
@@ -59,12 +59,12 @@ class RoomClimate(MultisplitEntity, ClimateEntity):
     )
 
     def __init__(self, coordinator: MultisplitCoordinator, room: str) -> None:
-        spec = next(r for r in coordinator.config.rooms if r.key == room)
-        super().__init__(coordinator, spec.group)
-        self._room = room
-        self._spec = spec
+        super().__init__(coordinator, room)
         self._attr_unique_id = f"{coordinator.entry.entry_id}:{room}:climate"
-        self._attr_name = spec.name
+        # None means "the device's own name", so this is climate.<room> rather
+        # than climate.<room>_<room>.
+        self._attr_name = None
+        spec = self._spec
         low, high = coordinator.config.group(spec.group).policy.setpoint_range
         self._attr_min_temp = low
         self._attr_max_temp = high

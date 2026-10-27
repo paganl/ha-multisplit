@@ -19,7 +19,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import DOMAIN
 from .coordinator import MultisplitCoordinator
-from .entity import MultisplitEntity
+from .entity import MultisplitEntity, MultisplitRoomEntity
 
 
 async def async_setup_entry(
@@ -80,7 +80,7 @@ class GroupModeSensor(MultisplitEntity, SensorEntity):
         }
 
 
-class RoomStatusSensor(MultisplitEntity, SensorEntity):
+class RoomStatusSensor(MultisplitRoomEntity, SensorEntity):
     """What one room's unit is doing, what it wanted, and why."""
 
     _attr_icon = "mdi:thermometer"
@@ -108,12 +108,9 @@ class RoomStatusSensor(MultisplitEntity, SensorEntity):
     )
 
     def __init__(self, coordinator: MultisplitCoordinator, room: str) -> None:
-        spec = next(r for r in coordinator.config.rooms if r.key == room)
-        super().__init__(coordinator, spec.group)
-        self._room = room
-        self._spec = spec
+        super().__init__(coordinator, room)
         self._attr_unique_id = f"{coordinator.entry.entry_id}:{room}:status"
-        self._attr_name = f"{spec.name} status"
+        self._attr_name = "Status"
 
     @property
     def native_value(self) -> str:
@@ -159,7 +156,7 @@ class RoomStatusSensor(MultisplitEntity, SensorEntity):
         }
 
 
-class RoomOvershootSensor(MultisplitEntity, SensorEntity):
+class RoomOvershootSensor(MultisplitRoomEntity, SensorEntity):
     """How far a room is from its target, signed.
 
     A plain number with a measurement state class, so Home Assistant's own
@@ -174,11 +171,9 @@ class RoomOvershootSensor(MultisplitEntity, SensorEntity):
     _attr_entity_registry_enabled_default = True
 
     def __init__(self, coordinator: MultisplitCoordinator, room: str) -> None:
-        spec = next(r for r in coordinator.config.rooms if r.key == room)
-        super().__init__(coordinator, spec.group)
-        self._room = room
+        super().__init__(coordinator, room)
         self._attr_unique_id = f"{coordinator.entry.entry_id}:{room}:overshoot"
-        self._attr_name = f"{spec.name} overshoot"
+        self._attr_name = "Overshoot"
 
     @property
     def native_value(self) -> float | None:
