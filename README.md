@@ -89,8 +89,58 @@ be reasoned about — they depend on a particular unit's minimum capacity
 against a particular room's heat loss. They were measured once by living with
 them. Telemetry is what makes measuring them again possible.
 
-One JSON object per cycle in `multisplit-telemetry.jsonl`, rotated at a
-configured size: outdoor temperature, and for each room its target, measured
+### Where it is written
+
+Everything goes in the Home Assistant **configuration directory** — the one
+holding `configuration.yaml`. On Home Assistant OS and in the container that
+is `/config`; on a core install it is wherever you pointed it, typically
+`~/.homeassistant`.
+
+| Path | What |
+| --- | --- |
+| `multisplit-telemetry.jsonl` | one JSON object per recorded cycle |
+| `multisplit-telemetry.jsonl.1` | the previous file, kept on rotation |
+| `home-assistant.log` | Home Assistant's own log, including this integration's warnings |
+
+The telemetry filename is configurable but is validated to be a plain
+filename — no slashes, no leading dot — so it cannot be made to write outside
+the configuration directory, and no `allowlist_external_dirs` entry is needed.
+
+To raise or lower what reaches `home-assistant.log`:
+
+```yaml
+logger:
+  logs:
+    custom_components.multisplit: debug
+```
+
+If you have no file access to the box, the **diagnostics download** on the
+device page carries the last 120 cycles with their reasons and scores, plus
+the observed overshoot points — enough to see what is happening, though not
+enough to fit a season's curve.
+
+### What is recorded
+
+Not every tick. Five rooms at a 30 second tick is about 1.8 kB a record and
+4.9 MB a day, which would mean any sane file size holds days while the curves
+need a season — and almost all of those records are identical.
+
+So a line is written when something changes: a group or room mode, what a room
+wants, a target, the divergence from the hardware, or **a room's temperature
+moving more than 0.2 °C** — that last one is what gives a room's coast after
+being switched off its resolution, and it is the measurement `fit_curves.py`
+needs most. Plus a heartbeat every 15 minutes, so a quiet file means a quiet
+system rather than a broken recorder. Each line carries `why_recorded`.
+
+A simulated day comes out at **129 records, 0.13 MB** instead of 2,880 — so
+the default 100 MB holds well over a year, twice that counting the rotated
+file. Real sensors are noisier than a simulation, so expect more than that,
+but not the twenty-fold more that recording every tick would cost.
+
+Recording every tick is still available (`on_change: false`) if you want the
+raw stream for a few days.
+
+Each record holds outdoor temperature, and for each room its target, measured
 temperature, what it wanted, what it was told to do and why. Then:
 
 ```bash

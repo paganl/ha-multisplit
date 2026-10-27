@@ -81,13 +81,40 @@ telemetry:
   # Relative to the Home Assistant configuration directory. One JSON object
   # per line, so it can be read incrementally and tailed.
   file: multisplit-telemetry.jsonl
+  # Should every tick be recorded, or only the ticks that change something?
+  # Recording every tick is mostly redundant and it is what makes the file
+  # useless: at a 30 second tick and five rooms it is about 1.8 kB a record,
+  # 4.9 MB a day, so a 25 MB file holds five days. The curves need a season.
+  # Recording only when something changes -- a mode, a target, what a room
+  # wants, or a room's temperature moving more than the threshold below --
+  # plus a periodic heartbeat, keeps every transition and every point of a
+  # room's coast while dropping the identical ticks in between. That is
+  # roughly a tenth of the volume for the same information.
+  on_change: true
+  # How far must a room's temperature move before that alone is recorded?
+  # What gives the coast its resolution. A room drifting after being
+  # switched off is the measurement tools/fit_curves.py needs most, and it
+  # is the one thing a change-triggered record would otherwise miss. Smaller
+  # means finer curves and a larger file.
+  # Units: degrees.
+  # UNMEASURED — assumed; the question was left blank.
+  movement: 0.2
+  # How often should a record be written even when nothing has changed?
+  # So a quiet file means a quiet system rather than a broken recorder, and
+  # so there is a baseline to compare against. Ignored when every tick is
+  # being recorded.
+  # Units: minutes.
+  # UNMEASURED — assumed; the question was left blank.
+  heartbeat_minutes: 15.0
   # How large may the telemetry file grow before it is rotated?
-  # At one record every 30 seconds a season of data is tens of megabytes. On
-  # rotation the current file is kept as .1 and a new one started, so the
-  # most recent history always survives.
+  # On rotation the current file is kept as .1 and a new one started, so
+  # twice this is the history actually retained. With change-triggered
+  # recording this works out at roughly half a megabyte a day, so 100 MB is
+  # comfortably a heating season either side of a rotation -- which is the
+  # span the participation curves need.
   # Units: megabytes.
   # UNMEASURED — assumed; the question was left blank.
-  max_mb: 25.0
+  max_mb: 100.0
   # Should each cycle also be fired as a Home Assistant event?
   # Fires multisplit_cycle, which automations and the logbook can react to.
   # Independent of the file: the file is for analysis, the event is for

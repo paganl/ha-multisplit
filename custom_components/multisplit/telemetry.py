@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import json
 import logging
+from datetime import datetime
 from pathlib import Path
 
 _LOGGER = logging.getLogger(__name__)
@@ -85,12 +86,15 @@ class Telemetry:
     """Appends cycles to a file, keeps the recent ones in memory."""
 
     def __init__(self, config, directory: Path) -> None:
-        """``config`` is a TelemetryConfig: enabled, file, max_bytes, events."""
+        """``config`` is a TelemetryConfig; see core.config for the fields."""
         self._config = config
         self._path = directory / self._config.file
         self.recent: list[dict] = []
         self.written = 0
+        self.skipped = 0
         self.last_error: str | None = None
+        self._last_written: dict | None = None
+        self._last_written_at: str | None = None
 
     @property
     def path(self) -> Path:
@@ -102,6 +106,72 @@ class Telemetry:
         if len(self.recent) > _RING:
             del self.recent[: len(self.recent) - _RING]
 
+    def interesting(self, record: dict) -> tuple[bool, str]:
+        """Is this cycle worth a line, and why?
+
+        Recording every tick is what makes a telemetry file useless: five
+        rooms at a 30 second tick is roughly 5 MB a day, so any sane file size
+        holds days, and the curves need a season. Almost all of those records
+        are identical.
+
+        So: every change worth having, plus enough of a room's drift to give
+        the coast its resolution, plus a heartbeat so a quiet file means a
+        quiet system rather than a broken recorder.
+        """
+        if not self._config.on_change:
+            return True, "recording every tick"
+
+        previous = self._last_written
+        if previous is None:
+            return True, "first record"
+
+        for group, now in record.get("groups", {}).items():
+            before = previous.get("groups", {}).get(group, {})
+            if before.get("mode") != now.get("mode"):
+                return True, f"{group} changed mode"
+
+        for room, now in record.get("rooms", {}).items():
+            before = previous.get("rooms", {}).get(room)
+            if before is None:
+                return True, f"{room} appeared"
+            if before.get("mode") != now.get("mode"):
+                return True, f"{room} started or stopped"
+            if before.get("wants") != now.get("wants"):
+                return True, f"{room} changed what it wants"
+            if before.get("target") != now.get("target"):
+                return True, f"{room} target changed"
+
+            was, is_now = before.get("measured"), now.get("measured")
+            if (was is None) != (is_now is None):
+                return True, f"{room} reading appeared or vanished"
+            if (
+                was is not None
+                and is_now is not None
+                and abs(is_now - was) >= self._config.movement
+            ):
+                # This is the one that matters for the curves: a room drifting
+                # after it was switched off.
+                return True, f"{room} moved {abs(is_now - was):.2f}°"
+
+        if previous.get("pending") != record.get("pending"):
+            return True, "the divergence from the hardware changed"
+
+        if self._heartbeat_due(record.get("at")):
+            return True, "heartbeat"
+
+        return False, "nothing changed"
+
+    def _heartbeat_due(self, at: object) -> bool:
+        if self._last_written_at is None or not isinstance(at, str):
+            return True
+        try:
+            elapsed = datetime.fromisoformat(at) - datetime.fromisoformat(
+                self._last_written_at
+            )
+        except ValueError:
+            return True
+        return elapsed >= self._config.heartbeat
+
     def write(self, record: dict) -> None:
         """Append one line. Called in an executor -- this touches the disk.
 
@@ -110,11 +180,20 @@ class Telemetry:
         """
         if not self._config.enabled:
             return
+
+        worth_it, why = self.interesting(record)
+        if not worth_it:
+            self.skipped += 1
+            return
+        record = {**record, "why_recorded": why}
+
         try:
             self._rotate_if_needed()
             with open(self._path, "a", encoding="utf-8") as handle:
                 handle.write(json.dumps(record, separators=(",", ":")) + "\n")
             self.written += 1
+            self._last_written = record
+            self._last_written_at = record.get("at")
             self.last_error = None
         except OSError as error:
             if self.last_error != str(error):
@@ -143,6 +222,8 @@ class Telemetry:
             "enabled": self._config.enabled,
             "file": str(self._path),
             "records_written": self.written,
+            "ticks_skipped": self.skipped,
+            "on_change": self._config.on_change,
             "cycles_in_memory": len(self.recent),
             "last_error": self.last_error,
             "divergence_counts": divergences,

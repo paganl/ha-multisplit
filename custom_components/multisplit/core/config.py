@@ -70,6 +70,9 @@ class TelemetryConfig:
     file: str
     max_bytes: int
     events: bool
+    on_change: bool
+    movement: float
+    heartbeat: timedelta
 
 
 @dataclass(frozen=True)
@@ -305,17 +308,29 @@ def load(raw: object) -> SystemConfig:
         reader.fail("operation", "'tick_seconds' below 5 would hammer the state machine")
 
     raw_telemetry = reader.mapping(root.get("telemetry"), "telemetry")
-    for flag in ("enabled", "events"):
+    for flag in ("enabled", "events", "on_change"):
         if not isinstance(raw_telemetry.get(flag), bool):
             reader.fail("telemetry", f"'{flag}' must be true or false, found {raw_telemetry.get(flag)!r}")
     max_mb = reader.number(raw_telemetry, "max_mb", "telemetry")
     if max_mb <= 0:
         reader.fail("telemetry", "'max_mb' must be positive")
+    movement = reader.number(raw_telemetry, "movement", "telemetry")
+    if movement <= 0:
+        reader.fail(
+            "telemetry",
+            "'movement' must be positive, or every tick is recorded whatever "
+            "'on_change' says",
+        )
     telemetry = TelemetryConfig(
         enabled=bool(raw_telemetry.get("enabled")),
         file=reader.text(raw_telemetry, "file", "telemetry"),
         max_bytes=int(max(0.0, max_mb) * 1024 * 1024),
         events=bool(raw_telemetry.get("events")),
+        on_change=bool(raw_telemetry.get("on_change")),
+        movement=movement,
+        heartbeat=timedelta(
+            minutes=reader.number(raw_telemetry, "heartbeat_minutes", "telemetry")
+        ),
     )
     if "/" in telemetry.file or telemetry.file.startswith("."):
         reader.fail("telemetry", f"'file' must be a plain filename, found {telemetry.file!r}")

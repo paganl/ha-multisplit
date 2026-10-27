@@ -45,6 +45,8 @@ def test_the_assumed_values_are_the_ones_we_think_they_are():
         "stale_after_minutes",
         "telemetry_max_mb",
         "telemetry_events",
+        "telemetry_movement",
+        "telemetry_heartbeat_minutes",
         "min_on_minutes",
         "lockout_hysteresis",
         "deadband",

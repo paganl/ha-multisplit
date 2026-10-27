@@ -33,9 +33,14 @@ CONFIG = load(yaml.safe_load((ROOT / "multisplit.yaml").read_text(encoding="utf-
 NOW = datetime(2026, 1, 15, 8, 0, tzinfo=timezone.utc)
 
 
-def cycle(*, at, outdoor, measured, target, mode, pending=()):
+def cycle(*, at, outdoor, measured, target, mode, pending=(), group_mode=...):
+    """One cycle for one room. ``group_mode`` defaults to the room's own mode;
+    pass it explicitly to model a room stopping while its group keeps running,
+    which is what a multi-room group actually does."""
+    if group_mode is ...:
+        group_mode = mode
     plan = Plan(
-        groups=(GroupDecision("a", mode, "because reasons", {"heat": 1.0}, ()),),
+        groups=(GroupDecision("a", group_mode, "because reasons", {"heat": 1.0}, ()),),
         rooms=(RoomCommand("living_room", mode, target, "because reasons", wants=None),),
         at=at,
     )
@@ -79,8 +84,15 @@ def test_a_missing_measurement_does_not_break_the_record():
 # --------------------------------------------------------------------------
 
 
+def every_tick(config):
+    """The configuration with change-triggering off, for volume tests."""
+    from dataclasses import replace
+
+    return replace(config, on_change=False)
+
+
 def test_cycles_are_appended_one_json_object_per_line(tmp_path):
-    telemetry = Telemetry(CONFIG.telemetry, tmp_path)
+    telemetry = Telemetry(every_tick(CONFIG.telemetry), tmp_path)
     for minute in range(3):
         telemetry.write(cycle(at=NOW + timedelta(minutes=minute), outdoor=7.0, measured=21.0, target=21.0, mode=HEAT))
 
@@ -88,6 +100,117 @@ def test_cycles_are_appended_one_json_object_per_line(tmp_path):
     assert len(lines) == 3
     assert all(json.loads(line)["outdoor"] == 7.0 for line in lines)
     assert telemetry.written == 3
+
+
+# --------------------------------------------------------------------------
+# Deciding what is worth a line
+# --------------------------------------------------------------------------
+
+
+def test_identical_ticks_are_not_written_twice(tmp_path):
+    """Recording every tick is what makes the file useless: 5 MB a day, so any
+    sane file size holds days, and the curves need a season."""
+    telemetry = Telemetry(CONFIG.telemetry, tmp_path)
+    for minute in range(10):
+        telemetry.write(
+            cycle(at=NOW + timedelta(minutes=minute), outdoor=7.0, measured=21.0, target=21.0, mode=HEAT)
+        )
+
+    assert telemetry.written == 1, "the first one, then nothing changed"
+    assert telemetry.skipped == 9
+
+
+def test_a_room_starting_or_stopping_is_always_written(tmp_path):
+    telemetry = Telemetry(CONFIG.telemetry, tmp_path)
+    telemetry.write(cycle(at=NOW, outdoor=7.0, measured=22.5, target=21.0, mode=HEAT))
+    telemetry.write(
+        cycle(
+            at=NOW + timedelta(seconds=30), outdoor=7.0, measured=22.5, target=21.0,
+            mode=None, group_mode=HEAT,
+        )
+    )
+
+    assert telemetry.written == 2
+    last = json.loads(telemetry.path.read_text(encoding="utf-8").strip().splitlines()[-1])
+    assert last["why_recorded"] == "living_room started or stopped"
+
+
+def test_a_group_changing_mode_is_always_written(tmp_path):
+    telemetry = Telemetry(CONFIG.telemetry, tmp_path)
+    telemetry.write(cycle(at=NOW, outdoor=7.0, measured=21.0, target=21.0, mode=HEAT))
+    telemetry.write(
+        cycle(at=NOW + timedelta(seconds=30), outdoor=7.0, measured=21.0, target=21.0, mode=None)
+    )
+    last = json.loads(telemetry.path.read_text(encoding="utf-8").strip().splitlines()[-1])
+    assert last["why_recorded"] == "a changed mode"
+
+
+def test_a_drifting_room_is_recorded_so_the_coast_has_resolution(tmp_path):
+    """The measurement fit_curves needs most, and the one a change-only
+    recorder would otherwise miss entirely."""
+    telemetry = Telemetry(CONFIG.telemetry, tmp_path)
+    telemetry.write(cycle(at=NOW, outdoor=7.0, measured=22.5, target=21.0, mode=None))
+
+    telemetry.write(
+        cycle(at=NOW + timedelta(seconds=30), outdoor=7.0, measured=22.6, target=21.0, mode=None)
+    )
+    assert telemetry.written == 1, "0.1° is below the 0.2° movement threshold"
+
+    telemetry.write(
+        cycle(at=NOW + timedelta(seconds=60), outdoor=7.0, measured=22.75, target=21.0, mode=None)
+    )
+    assert telemetry.written == 2
+    last = json.loads(telemetry.path.read_text(encoding="utf-8").strip().splitlines()[-1])
+    assert "moved 0.25" in last["why_recorded"]
+
+
+def test_a_heartbeat_is_written_even_when_nothing_moves(tmp_path):
+    """So a quiet file means a quiet system, not a broken recorder."""
+    telemetry = Telemetry(CONFIG.telemetry, tmp_path)
+    telemetry.write(cycle(at=NOW, outdoor=7.0, measured=21.0, target=21.0, mode=HEAT))
+    telemetry.write(
+        cycle(at=NOW + timedelta(minutes=5), outdoor=7.0, measured=21.0, target=21.0, mode=HEAT)
+    )
+    assert telemetry.written == 1
+
+    telemetry.write(
+        cycle(at=NOW + timedelta(minutes=16), outdoor=7.0, measured=21.0, target=21.0, mode=HEAT)
+    )
+    assert telemetry.written == 2
+    last = json.loads(telemetry.path.read_text(encoding="utf-8").strip().splitlines()[-1])
+    assert last["why_recorded"] == "heartbeat"
+
+
+def test_a_changed_divergence_is_written(tmp_path):
+    """Shadow mode's whole output is the divergence, so it must not be dropped."""
+    telemetry = Telemetry(CONFIG.telemetry, tmp_path)
+    telemetry.write(cycle(at=NOW, outdoor=7.0, measured=21.0, target=21.0, mode=HEAT))
+    telemetry.write(
+        cycle(
+            at=NOW + timedelta(seconds=30), outdoor=7.0, measured=21.0, target=21.0, mode=HEAT,
+            pending=["living_room: off → heat at 21°"],
+        )
+    )
+    assert telemetry.written == 2
+
+
+def test_change_triggering_cuts_the_volume_by_about_a_tenth(tmp_path):
+    """A day of a room warming slowly, at a 30 second tick."""
+    telemetry = Telemetry(CONFIG.telemetry, tmp_path)
+    every = Telemetry(every_tick(CONFIG.telemetry), tmp_path / "every")
+    (tmp_path / "every").mkdir()
+
+    measured = 19.0
+    for tick in range(2880):
+        at = NOW + timedelta(seconds=30 * tick)
+        measured += 0.002  # about 0.24° an hour
+        record = cycle(at=at, outdoor=7.0, measured=round(measured, 3), target=21.0, mode=HEAT)
+        telemetry.write(record)
+        every.write(record)
+
+    assert every.written == 2880
+    assert telemetry.written < every.written / 8
+    assert telemetry.path.stat().st_size < every.path.stat().st_size / 8
 
 
 def test_an_unwritable_file_is_reported_but_never_raises(tmp_path):

@@ -120,17 +120,60 @@ sections:
         target: telemetry.file
         answer: multisplit-telemetry.jsonl
 
+      - id: telemetry_on_change
+        ask: Should every tick be recorded, or only the ticks that change something?
+        why: >-
+          Recording every tick is mostly redundant and it is what makes the
+          file useless: at a 30 second tick and five rooms it is about 1.8 kB
+          a record, 4.9 MB a day, so a 25 MB file holds five days. The curves
+          need a season. Recording only when something changes -- a mode, a
+          target, what a room wants, or a room's temperature moving more than
+          the threshold below -- plus a periodic heartbeat, keeps every
+          transition and every point of a room's coast while dropping the
+          identical ticks in between. That is roughly a tenth of the volume
+          for the same information.
+        type: boolean
+        target: telemetry.on_change
+        answer: true
+
+      - id: telemetry_movement
+        ask: How far must a room's temperature move before that alone is recorded?
+        why: >-
+          What gives the coast its resolution. A room drifting after being
+          switched off is the measurement tools/fit_curves.py needs most, and
+          it is the one thing a change-triggered record would otherwise miss.
+          Smaller means finer curves and a larger file.
+        type: number
+        unit: degrees
+        target: telemetry.movement
+        answer: null
+        assume: 0.2
+
+      - id: telemetry_heartbeat_minutes
+        ask: How often should a record be written even when nothing has changed?
+        why: >-
+          So a quiet file means a quiet system rather than a broken recorder,
+          and so there is a baseline to compare against. Ignored when every
+          tick is being recorded.
+        type: number
+        unit: minutes
+        target: telemetry.heartbeat_minutes
+        answer: null
+        assume: 15
+
       - id: telemetry_max_mb
         ask: How large may the telemetry file grow before it is rotated?
         why: >-
-          At one record every 30 seconds a season of data is tens of
-          megabytes. On rotation the current file is kept as .1 and a new one
-          started, so the most recent history always survives.
+          On rotation the current file is kept as .1 and a new one started, so
+          twice this is the history actually retained. With change-triggered
+          recording this works out at roughly half a megabyte a day, so 100 MB
+          is comfortably a heating season either side of a rotation -- which is
+          the span the participation curves need.
         type: number
         unit: megabytes
         target: telemetry.max_mb
         answer: null
-        assume: 25
+        assume: 100
 
       - id: telemetry_events
         ask: Should each cycle also be fired as a Home Assistant event?
