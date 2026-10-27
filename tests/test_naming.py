@@ -56,3 +56,28 @@ def test_descriptions_carry_the_suggestion_only_when_there_is_one():
     )
     assert "did you mean" in lines[0]
     assert lines[1] == "climate.conservatory_underfloor"
+
+
+def test_descriptions_are_bare_when_the_state_machine_is_empty():
+    """What a check that ran too early actually saw.
+
+    With no climate entities registered yet there is nothing to compare
+    against, so every id comes back without a suggestion — which is how the
+    startup race showed itself: five rooms reported missing and not one
+    "did you mean".
+    """
+    missing = [
+        "climate.mitsubishi_ac_livingroom_mitsubishi_ac_livingroom_climate",
+        "climate.mitsubishi_ac_ischa_mitsubishi_ac_ischa_climat",
+    ]
+    assert describe_missing(missing, []) == missing
+    assert all("did you mean" not in line for line in describe_missing(missing, []))
+
+
+def test_a_room_is_never_offered_as_a_correction_for_another_room():
+    """Every real id, checked against every other. None should match."""
+    for entity_id in REAL:
+        others = [candidate for candidate in REAL if candidate != entity_id]
+        assert closest(entity_id, others) is None, (
+            f"{entity_id} was offered a correction from a different entity"
+        )

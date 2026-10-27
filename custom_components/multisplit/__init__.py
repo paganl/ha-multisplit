@@ -13,9 +13,18 @@ from pathlib import Path
 import voluptuous as vol
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant, ServiceCall, ServiceResponse, SupportsResponse
+from homeassistant.const import EVENT_HOMEASSISTANT_STARTED
+from homeassistant.core import (
+    CoreState,
+    HomeAssistant,
+    ServiceCall,
+    ServiceResponse,
+    SupportsResponse,
+    callback,
+)
 from homeassistant.exceptions import ConfigEntryNotReady, HomeAssistantError
 from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers.event import async_call_later
 
 from . import measurement
 from .const import (
@@ -35,6 +44,10 @@ from .core.naming import describe_missing
 from .yaml_config import load_file
 
 _LOGGER = logging.getLogger(__name__)
+
+#: How long after Home Assistant has started to wait before deciding a
+#: configured entity is genuinely absent rather than merely late.
+_STARTUP_GRACE = 60.0
 
 SET_ROOM_TARGET_SCHEMA = vol.Schema(
     {
@@ -89,13 +102,48 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     _async_register_services(hass)
 
-    missing = measurement.unavailable_entities(hass, config)
-    if missing:
-        # A configured entity that does not exist is the failure that looks
-        # least like a configuration mistake: the room simply never gets a
-        # reading, stands by for ever and reports no data. So say it on the
-        # way up -- and offer the id it was probably meant to be, because one
-        # transposed character is exactly what a person reads straight past.
+    _async_check_entities_later(hass, entry, config)
+
+    if not config.operation.apply_to_hardware:
+        _LOGGER.warning(
+            "multisplit: shadow mode — the plan is published but no unit will be "
+            "commanded. Set operation.apply_to_hardware to true when the "
+            "divergences from the existing automations have been reviewed."
+        )
+
+    return True
+
+
+@callback
+def _async_check_entities_later(
+    hass: HomeAssistant, entry: ConfigEntry, config: SystemConfig
+) -> None:
+    """Warn about configured entities that do not exist -- once it is fair to.
+
+    Not at setup. Home Assistant does not order integration startup, so at the
+    moment this one comes up the integration that provides the climate
+    entities may not have registered any of them yet. Checking then reported
+    every room as missing, which is alarming, wrong, and worse than silence:
+    it teaches you to ignore the warning that will one day be right.
+
+    So the check waits for Home Assistant to finish starting, and then for a
+    grace period derived from the tick -- long enough for a slow integration,
+    short enough that a genuine typo is reported while you are still looking.
+
+    Nothing depends on this check. ``measurement.collect`` re-reads every
+    entity on every cycle, so a room whose entity appears late starts working
+    on its own; this only explains one that never does.
+    """
+    grace = max(_STARTUP_GRACE, 2 * config.operation.tick.total_seconds())
+
+    async def _check(_now=None) -> None:
+        missing = measurement.unavailable_entities(hass, config)
+        if not missing:
+            return
+        # The suggestion is only worth offering once the state machine is
+        # populated -- with an empty climate domain there is nothing to
+        # compare against, which is exactly what happened when this ran too
+        # early.
         described = describe_missing(missing, hass.states.async_entity_ids())
         _LOGGER.warning(
             "multisplit: %d configured %s not exist, so %s will be treated as "
@@ -106,14 +154,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             "; ".join(described),
         )
 
-    if not config.operation.apply_to_hardware:
-        _LOGGER.warning(
-            "multisplit: shadow mode — the plan is published but no unit will be "
-            "commanded. Set operation.apply_to_hardware to true when the "
-            "divergences from the existing automations have been reviewed."
-        )
+    @callback
+    def _after_start(_event) -> None:
+        entry.async_on_unload(async_call_later(hass, grace, _check))
 
-    return True
+    if hass.state is CoreState.running:
+        entry.async_on_unload(async_call_later(hass, grace, _check))
+    else:
+        entry.async_on_unload(
+            hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, _after_start)
+        )
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:

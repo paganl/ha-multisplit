@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.1.5 — 2026-10-27
+
+**Fixed**
+
+- The missing-entity check ran at setup and reported every room. Home
+  Assistant does not order integration startup, so when this one came up the
+  integration providing the climate entities had often registered none of
+  them — and the check said all five were absent. Alarming, wrong, and worse
+  than silence, because it teaches you to ignore the warning that will one
+  day be right. It now waits for Home Assistant to finish starting and then
+  for a grace period derived from the tick.
+
+  The giveaway in the report was that not one of the five carried a "did you
+  mean" suggestion: with an empty climate domain there was nothing to compare
+  against.
+
+  Nothing depended on the check. `measurement.collect` re-reads every entity
+  every cycle, so a room whose entity appears late starts working on its own;
+  the warning only ever explained one that never does.
+
 ## 0.1.4 — 2026-10-27
 
 **Fixed**
