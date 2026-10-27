@@ -31,6 +31,7 @@ from .const import (
 )
 from .coordinator import MultisplitCoordinator
 from .core.config import ConfigError, SystemConfig
+from .core.naming import describe_missing
 from .yaml_config import load_file
 
 _LOGGER = logging.getLogger(__name__)
@@ -90,16 +91,19 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     missing = measurement.unavailable_entities(hass, config)
     if missing:
-        # Named rather than guessed at. A configured entity that does not
-        # exist is the one failure mode that looks like a hardware fault from
-        # the outside, so say it out loud on the way up.
+        # A configured entity that does not exist is the failure that looks
+        # least like a configuration mistake: the room simply never gets a
+        # reading, stands by for ever and reports no data. So say it on the
+        # way up -- and offer the id it was probably meant to be, because one
+        # transposed character is exactly what a person reads straight past.
+        described = describe_missing(missing, hass.states.async_entity_ids())
         _LOGGER.warning(
-            "multisplit: %d configured entit%s do not exist and will be "
-            "treated as having no reading: %s. Check the spelling in "
-            "Developer Tools → States.",
+            "multisplit: %d configured %s not exist, so %s will be treated as "
+            "having no reading: %s",
             len(missing),
-            "y" if len(missing) == 1 else "ies",
-            ", ".join(missing),
+            "entity does" if len(missing) == 1 else "entities do",
+            "that room" if len(missing) == 1 else "those rooms",
+            "; ".join(described),
         )
 
     if not config.operation.apply_to_hardware:

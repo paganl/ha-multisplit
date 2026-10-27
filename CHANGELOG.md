@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.1.3 — 2026-10-27
+
+**Fixed**
+
+- The missing-entity warning said "1 configured entity do not exist". The
+  noun was pluralised and the verb was not.
+
+**Added**
+
+- That warning now suggests the id the entity was probably meant to be. On
+  the instance this came from, a room was configured as
+  `…_ischa_climat` where every other room ends in `climate`: one character,
+  and that room silently never got a temperature. Matching is on absolute
+  character difference rather than a similarity ratio, because these ids are
+  long and almost entirely boilerplate — two completely different rooms score
+  over 0.85 similar, so a ratio would confidently suggest the wrong room.
+
 ## 0.1.2 — 2026-10-27
 
 Upgrading from 0.1.0 failed, because the configuration file is versioned
