@@ -489,3 +489,59 @@ def test_stopping_does_start_the_rest_clock():
         now=NOW + timedelta(minutes=5),
     )
     assert "resting" in too_soon.room("office").because
+
+
+def test_a_room_whose_mode_is_locked_out_is_told_that_not_about_the_group():
+    """Name the binding constraint.
+
+    "The group is heating" is true, but if the wanted mode is locked out the
+    room would be standing by whatever the group were doing — and that is the
+    difference between waiting for a turn and waiting for the weather.
+    """
+    locked = constraints_for(PolicyConfig(cool_below=20.0), outdoor=13.0)
+    result = run(
+        configs("office", "bedroom"),
+        {"office": 22.5, "bedroom": 19.0},
+        {"office": 20.0, "bedroom": 20.0},
+        outdoor=13.0,
+        constraints=locked,
+    )
+    assert result.group("a").mode == HEAT
+    office = result.room("office")
+    assert office.wants == COOL
+    assert "locked out" in office.because
+    assert "the group is heating" not in office.because
+
+
+def test_a_room_waiting_for_the_weather_does_not_accrue_starvation():
+    """Aging exists so a starved room eventually wins. A room whose mode is
+    locked out cannot win at any weight, so ageing it produces an unbounded
+    clock that means nothing."""
+    locked = constraints_for(PolicyConfig(cool_below=20.0), outdoor=13.0)
+    result = run(
+        configs("office", "bedroom"),
+        {"office": 22.5, "bedroom": 19.0},
+        {"office": 20.0, "bedroom": 20.0},
+        outdoor=13.0,
+        constraints=locked,
+        runtime={"office": RoomRuntime("office", unserved_since=NOW - timedelta(hours=6))},
+    )
+    office = next(r for r in result.runtime if r.room == "office")
+    assert office.unserved_since is None, "the clock should stop, not run for ever"
+
+
+def test_a_room_waiting_its_turn_still_accrues_starvation():
+    """The other half: genuine contention must still age, or nothing ever
+    gets its turn."""
+    result = run(
+        configs("office", "bedroom"),
+        {"office": 22.5, "bedroom": 19.0},
+        {"office": 20.0, "bedroom": 20.0},
+        outdoor=22.0,
+        constraints=constraints_for(PolicyConfig(cool_below=20.0), outdoor=22.0),
+    )
+    assert result.group("a").mode == COOL, "2.5° of cool demand outweighs 1° of heat"
+    bedroom = next(r for r in result.runtime if r.room == "bedroom")
+    assert bedroom.unserved_since == NOW, "the room that lost the argument is waiting its turn"
+    office = next(r for r in result.runtime if r.room == "office")
+    assert office.unserved_since is None, "the room being served is not starved"

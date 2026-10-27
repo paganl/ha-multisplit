@@ -345,6 +345,15 @@ def _participate(
             f"(target {_fmt(target)}°)"
         )
     if demand.wants != mode:
+        # Name the binding constraint, not the visible one. "The group is
+        # heating" is true, but if the wanted mode is locked out the room
+        # would be standing by whatever the group were doing -- and that is
+        # the difference between waiting for a turn and waiting for weather.
+        if demand.wants not in constraints.allowed_modes:
+            reason = constraints.reasons.get(
+                demand.wants, f"{demand.wants} is not permitted"
+            )
+            return None, f"standing by — wants {demand.wants}, but {reason}"
         return None, f"standing by — wants {demand.wants}, the group is {mode}ing"
 
     rest = policy.rest(outdoor)
@@ -436,7 +445,15 @@ def plan(
             # state machine is tested rather than trusted.
             running = mode is not None
             changed = running != was.running or (running and was.mode != mode)
-            starved = demand.wants is not None and decision.mode != demand.wants
+            # Starvation is for a room waiting its turn, not one waiting for
+            # the weather. Aging exists to let a starved room eventually win;
+            # a room whose mode is locked out cannot win at any weight, so
+            # ageing it only produces an unbounded clock that means nothing.
+            starved = (
+                demand.wants is not None
+                and demand.wants in limits.allowed_modes
+                and decision.mode != demand.wants
+            )
             next_runtime.append(
                 replace(
                     was,

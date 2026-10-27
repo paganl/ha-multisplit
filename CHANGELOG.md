@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.1.9 — 2026-10-27
+
+**Fixed**
+
+- A room whose wanted mode is locked out was told "the group is heating".
+  True, but not the binding constraint: it would be standing by whatever the
+  group were doing. It now names the lockout, which is the difference between
+  waiting for a turn and waiting for the weather.
+- That room also accrued starvation for ever. Aging exists so a starved room
+  eventually wins; a room whose mode is locked out cannot win at any weight,
+  so the clock only produced an unbounded number that meant nothing. It now
+  runs for genuine contention only.
+
+**Added**
+
+- `dashboard.yaml`: cards built from the integration's own entities, which
+  show each group's mode with its reasoning and each room's status, target
+  against measured, and why it is doing what it is doing.
+
+  The old `multisplit-climate-card.js` predates this integration. Its mode
+  request buttons call a script that no longer exists, so a request sits on
+  "requested" for ever and cannot be cancelled or reversed — it is waiting
+  for an answer from a system that has been deleted. There is nothing to
+  request now: a room that wants the other mode accumulates weight until it
+  wins. Remove that card rather than wiring it up.
+
 ## 0.1.8 — 2026-10-27
 
 **Fixed**
