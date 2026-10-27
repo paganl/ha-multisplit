@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.1.7 — 2026-10-27
+
+**Added**
+
+- **A unit set to a temperature range is now detected and named**, at startup
+  and in diagnostics, instead of failing silently. The reconciler reads and
+  writes a single `temperature`; a dual-setpoint unit exposes
+  `target_temp_low` and `target_temp_high` and no `temperature` at all, so
+  the comparison reported a difference on every cycle and the write was
+  refused on every attempt — for ever, quietly, with the divergence sensor
+  permanently wrong.
+
+  It is not worked around, because the clash is not really about service
+  calls. Choosing between heating and cooling is the decision this system
+  exists to take on behalf of every room sharing an outdoor unit, precisely
+  because a room cannot see what the others need. A unit making that choice
+  privately, from a band, is a second controller, and the two can only agree
+  by accident. Writing a band would mean inventing how wide it should be —
+  and a band wide enough to be accepted is wide enough for the unit to start
+  deciding again.
+
 ## 0.1.6 — 2026-10-27
 
 **Fixed**

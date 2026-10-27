@@ -68,6 +68,7 @@ async def async_get_config_entry_diagnostics(
         },
         "health": {
             "missing_entities": measurement.unavailable_entities(hass, config),
+            "uncommandable_entities": measurement.uncommandable_entities(hass, config),
             "excluded_rooms": sorted(coordinator.excluded),
             "overrides": {
                 room: {

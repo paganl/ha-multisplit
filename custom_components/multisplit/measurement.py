@@ -11,6 +11,8 @@ from __future__ import annotations
 import logging
 from datetime import datetime
 
+from homeassistant.components.climate import ClimateEntityFeature
+from homeassistant.const import ATTR_SUPPORTED_FEATURES
 from homeassistant.core import HomeAssistant
 from homeassistant.const import STATE_UNAVAILABLE, STATE_UNKNOWN
 from homeassistant.util import dt as dt_util
@@ -106,3 +108,53 @@ def unavailable_entities(hass: HomeAssistant, config: SystemConfig) -> list[str]
         if room.schedule_entity:
             wanted.append(room.schedule_entity)
     return [entity_id for entity_id in wanted if hass.states.get(entity_id) is None]
+
+
+def uncommandable_entities(hass: HomeAssistant, config: SystemConfig) -> dict[str, str]:
+    """Configured units this integration cannot actually command, and why.
+
+    The one that matters in practice is a unit set to a temperature *range* --
+    a dual setpoint, low and high, which a unit in its own auto mode uses to
+    choose between heating and cooling by itself.
+
+    That is a deeper problem than an unsupported service call. Choosing
+    between heating and cooling is the decision this system exists to take, on
+    behalf of every room sharing an outdoor unit, because a room cannot see
+    what the others need. A unit making that choice privately, from a band, is
+    a second controller -- and the two cannot agree except by accident.
+
+    Reported rather than worked around: writing a band would mean inventing
+    how wide it should be, and a band wide enough to be accepted is wide
+    enough for the unit to start making its own decisions again.
+    """
+    out: dict[str, str] = {}
+
+    for room in config.rooms:
+        state = hass.states.get(room.climate_entity)
+        if state is None:
+            continue  # absent is a different problem, reported separately
+
+        features = state.attributes.get(ATTR_SUPPORTED_FEATURES) or 0
+        single = bool(features & ClimateEntityFeature.TARGET_TEMPERATURE)
+        ranged = bool(features & ClimateEntityFeature.TARGET_TEMPERATURE_RANGE)
+
+        if single:
+            continue
+        if ranged:
+            low = state.attributes.get("target_temp_low")
+            high = state.attributes.get("target_temp_high")
+            band = f" (currently {low}–{high})" if low is not None and high is not None else ""
+            out[room.climate_entity] = (
+                f"{room.key}: set to a temperature range{band} rather than a single "
+                "setpoint. A unit choosing between heating and cooling from a band "
+                "is deciding for itself what this system decides for the whole "
+                "group, so the two will disagree. Switch the unit to a single "
+                "setpoint."
+            )
+        else:
+            out[room.climate_entity] = (
+                f"{room.key}: reports no settable target temperature at all "
+                f"(supported_features={features})."
+            )
+
+    return out

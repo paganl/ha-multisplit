@@ -29,7 +29,8 @@ from homeassistant.components.climate import (
     SERVICE_SET_TEMPERATURE,
     HVACMode,
 )
-from homeassistant.const import ATTR_ENTITY_ID, ATTR_TEMPERATURE
+from homeassistant.components.climate import ClimateEntityFeature
+from homeassistant.const import ATTR_ENTITY_ID, ATTR_SUPPORTED_FEATURES, ATTR_TEMPERATURE
 from homeassistant.core import HomeAssistant
 
 from .core.config import SystemConfig
@@ -53,6 +54,7 @@ class Reconciler:
         self._config = config
         self._rooms = {room.key: room for room in config.rooms}
         self._last_write: dict[str, datetime] = {}
+        self._uncommandable: set[str] = set()
         self.last_actions: tuple[str, ...] = ()
 
     async def apply(self, plan: Plan, now: datetime) -> tuple[str, ...]:
@@ -67,6 +69,23 @@ class Reconciler:
             state = self._hass.states.get(room.climate_entity)
             if state is None:
                 actions.append(f"{command.room}: {room.climate_entity} does not exist")
+                continue
+
+            if not _takes_a_setpoint(state) and command.mode is not None:
+                # Retrying a call the unit cannot accept, every interval, for
+                # ever, is worse than saying so once: it fills the log and
+                # leaves the divergence sensor permanently wrong.
+                if command.room not in self._uncommandable:
+                    self._uncommandable.add(command.room)
+                    _LOGGER.warning(
+                        "multisplit: %s takes a temperature range, not a single "
+                        "setpoint, so this integration cannot command it. Switch "
+                        "the unit to a single setpoint.",
+                        room.climate_entity,
+                    )
+                actions.append(
+                    f"{command.room}: cannot be commanded — it takes a temperature range"
+                )
                 continue
 
             desired_mode = _HVAC[command.mode] if command.mode else HVACMode.OFF
@@ -136,6 +155,12 @@ class Reconciler:
             if room is None:
                 continue
             state = self._hass.states.get(room.climate_entity)
+            if state is not None and not _takes_a_setpoint(state):
+                pending.append(
+                    f"{command.room}: takes a temperature range, so its setpoint "
+                    "cannot be compared or commanded"
+                )
+                continue
             desired_mode = _HVAC[command.mode] if command.mode else HVACMode.OFF
             observed_mode = state.state if state else "missing"
             observed_target = state.attributes.get(ATTR_TEMPERATURE) if state else None
@@ -161,3 +186,15 @@ class Reconciler:
             )
             pending.append(f"{command.room}: {observed} → {wanted}")
         return tuple(pending)
+
+
+def _takes_a_setpoint(state) -> bool:
+    """Whether this unit accepts a single target temperature.
+
+    A unit set to a range exposes target_temp_low and target_temp_high and no
+    `temperature` at all, so there is nothing to compare against and nothing
+    to write -- the comparison would report a difference on every cycle and
+    the write would be refused on every attempt.
+    """
+    features = state.attributes.get(ATTR_SUPPORTED_FEATURES) or 0
+    return bool(features & ClimateEntityFeature.TARGET_TEMPERATURE)

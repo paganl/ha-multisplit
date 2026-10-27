@@ -137,6 +137,9 @@ def _async_check_entities_later(
     grace = max(_STARTUP_GRACE, 2 * config.operation.tick.total_seconds())
 
     async def _check(_now=None) -> None:
+        for entity_id, why in measurement.uncommandable_entities(hass, config).items():
+            _LOGGER.warning("multisplit: %s — %s", entity_id, why)
+
         missing = measurement.unavailable_entities(hass, config)
         if not missing:
             return
