@@ -55,7 +55,7 @@ class RoomClimate(MultisplitRoomEntity, ClimateEntity):
     )
     _attr_target_temperature_step = 0.5
     _unrecorded_attributes = frozenset(
-        {"reason", "wants", "group", "group_mode", "group_reason"}
+        {"reason", "wants", "heat_to", "cool_to", "group", "group_mode", "group_reason"}
     )
 
     def __init__(self, coordinator: MultisplitCoordinator, room: str) -> None:
@@ -109,6 +109,8 @@ class RoomClimate(MultisplitRoomEntity, ClimateEntity):
         return {
             "reason": command.because,
             "wants": command.wants,
+            "heat_to": command.heat_to,
+            "cool_to": command.cool_to,
             "group": self._spec.group,
             "group_mode": plan.group(self._spec.group).mode or "off",
             "group_reason": plan.group(self._spec.group).because,

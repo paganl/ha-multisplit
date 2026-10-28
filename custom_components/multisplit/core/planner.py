@@ -44,6 +44,13 @@ def _fmt(value: float) -> str:
     return f"{value:.1f}".rstrip("0").rstrip(".") if value % 1 else f"{value:.0f}"
 
 
+def _band(demand: "_Demand") -> str:
+    """How the room's comfort is described in a reason."""
+    if demand.cool_to > demand.heat_to:
+        return f"(wanted between {_fmt(demand.heat_to)}° and {_fmt(demand.cool_to)}°)"
+    return f"(target {_fmt(demand.heat_to)}°)"
+
+
 def _fmt_delta(delta: timedelta) -> str:
     minutes = int(delta.total_seconds() // 60)
     if minutes < 60:
@@ -74,7 +81,8 @@ class _Demand:
         "holding",
         "votes",
         "error",
-        "target",
+        "heat_to",
+        "cool_to",
         "weight",
         "measurement",
         "intent",
@@ -86,7 +94,8 @@ class _Demand:
         wants: str | None,
         holding: str | None,
         error: float,
-        target: float,
+        heat_to: float,
+        cool_to: float,
         weight: float,
         measurement: RoomMeasurement,
         intent: RoomIntent,
@@ -96,10 +105,15 @@ class _Demand:
         self.holding = holding
         self.votes = wants or holding
         self.error = error
-        self.target = target
+        self.heat_to = heat_to
+        self.cool_to = cool_to
         self.weight = weight
         self.measurement = measurement
         self.intent = intent
+
+    def target_for(self, mode: str | None) -> float:
+        """Heating aims at the bottom of the band, cooling at the top."""
+        return self.cool_to if mode == COOL else self.heat_to
 
 
 def _demand(
@@ -112,33 +126,54 @@ def _demand(
     outdoor: float | None,
     now: datetime,
 ) -> _Demand:
-    target = constraints.clamp(intent.target)
+    heat_to = constraints.clamp(intent.heat_to)
+    cool_to = max(heat_to, constraints.clamp(intent.cool_to))
 
     if not measurement.trustworthy:
         # A room with no trustworthy temperature does not get a vote. Guessing
         # here would produce a confident wrong decision for the whole group.
-        return _Demand(room.room, None, None, 0.0, target, 0.0, measurement, intent)
+        return _Demand(
+            room.room, None, None, 0.0, heat_to, cool_to, 0.0, measurement, intent
+        )
 
     temperature = measurement.temperature or 0.0
-    error = target - temperature
 
-    # Asymmetric thresholds. Wanting the opposite of what is currently being
-    # delivered has to clear the overshoot the participation controller
-    # deliberately tolerates -- otherwise structural overshoot reads as demand
-    # for the other mode and the hardware thrashes itself.
+    # The room is content anywhere inside its band; demand is the distance
+    # outside it, in whichever direction it has left.
+    below = heat_to - temperature
+    above = temperature - cool_to
+
+    # Wanting the opposite of what is being delivered has to clear the
+    # overshoot the participation controller deliberately tolerates, or
+    # structural overshoot reads as demand for the other mode and the hardware
+    # thrashes itself.
+    #
+    # Measured from the mode's own end of the band, and combined with the band
+    # by taking whichever threshold is further out. A wide band already
+    # separates the two demands, so adding the tolerance on top of it would
+    # double-count the same separation twice over.
     want_heat_above = constraints.deadband
     want_cool_above = constraints.deadband
     if delivering == HEAT:
-        want_cool_above += constraints.overshoot_tolerance
+        want_cool_above = max(
+            want_cool_above,
+            constraints.deadband + constraints.overshoot_tolerance - (cool_to - heat_to),
+        )
     elif delivering == COOL:
-        want_heat_above += constraints.overshoot_tolerance
+        want_heat_above = max(
+            want_heat_above,
+            constraints.deadband + constraints.overshoot_tolerance - (cool_to - heat_to),
+        )
 
-    if error > want_heat_above:
+    if below > want_heat_above:
         wants: str | None = HEAT
-    elif error < -want_cool_above:
+        error = below
+    elif above > want_cool_above:
         wants = COOL
+        error = above
     else:
         wants = None
+        error = 0.0
 
     # A unit already running is committed: it is calling on the compressor
     # whether or not comfort demand still exists. That holds while it is short
@@ -149,9 +184,9 @@ def _demand(
     if runtime.running and runtime.mode is not None:
         cut_off = room.participation.cut_off(outdoor)
         if runtime.mode == HEAT:
-            short_of_cut_off = temperature <= target + cut_off
+            short_of_cut_off = temperature <= heat_to + cut_off
         else:
-            short_of_cut_off = temperature >= target - cut_off
+            short_of_cut_off = temperature >= cool_to - cut_off
         if short_of_cut_off or runtime.elapsed(now) < room.participation.min_on:
             holding = runtime.mode
 
@@ -168,7 +203,7 @@ def _demand(
     weight = magnitude * max(0.0, intent.priority) * aging
 
     return _Demand(
-        room.room, wants, holding, error, target, weight, measurement, intent
+        room.room, wants, holding, error, heat_to, cool_to, weight, measurement, intent
     )
 
 
@@ -273,7 +308,6 @@ def _participate(
     real answer is a stale sensor or a reached cut-off.
     """
     policy = room.participation
-    target = demand.target
 
     if not demand.measurement.trustworthy:
         why = "sensor is stale" if demand.measurement.stale else "no temperature reading"
@@ -286,10 +320,12 @@ def _participate(
         resume = constraints.deadband
 
     def cut_off_state(for_mode: str) -> tuple[bool, float]:
+        """Judged against the end of the band that mode is working towards."""
+        end = demand.target_for(for_mode)
         if for_mode == HEAT:
-            point = target + cut_off
+            point = end + cut_off
             return temperature > point, point
-        point = target - cut_off
+        point = end - cut_off
         return temperature < point, point
 
     anticipatory = (
@@ -334,16 +370,10 @@ def _participate(
             return None, f"standing by — wants {demand.wants}, but {reason}"
         if demand.wants is not None:
             return None, f"standing by — wants {demand.wants}, the group is off"
-        return None, (
-            f"standing by — satisfied at {_fmt(temperature)}° "
-            f"(target {_fmt(target)}°)"
-        )
+        return None, f"standing by — satisfied at {_fmt(temperature)}° {_band(demand)}"
 
     if demand.wants is None:
-        return None, (
-            f"standing by — satisfied at {_fmt(temperature)}° "
-            f"(target {_fmt(target)}°)"
-        )
+        return None, f"standing by — satisfied at {_fmt(temperature)}° {_band(demand)}"
     if demand.wants != mode:
         # Name the binding constraint, not the visible one. "The group is
         # heating" is true, but if the wanted mode is locked out the room
@@ -365,14 +395,15 @@ def _participate(
             f"{_fmt_delta(rest)} rest"
         )
 
+    end = demand.target_for(mode)
     ready = (
-        temperature < target - resume if mode == HEAT else temperature > target + resume
+        temperature < end - resume if mode == HEAT else temperature > end + resume
     )
     if not ready:
         return None, (
             f"standing by — {_fmt(temperature)}° is within {_fmt(resume)}° of target"
         )
-    return mode, f"{mode}ing — {_fmt(temperature)}° against a target of {_fmt(target)}°"
+    return mode, f"{mode}ing — {_fmt(temperature)}° against a target of {_fmt(end)}°"
 
 
 # --------------------------------------------------------------------------
@@ -434,10 +465,12 @@ def plan(
                 RoomCommand(
                     room=room.room,
                     mode=mode,
-                    target=demand.target,
+                    target=demand.target_for(mode or demand.wants),
                     because=because,
                     wants=demand.wants,
                     unserved_for=was.unserved_for(now),
+                    heat_to=demand.heat_to,
+                    cool_to=demand.cool_to,
                 )
             )
 

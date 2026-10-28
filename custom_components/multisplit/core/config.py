@@ -61,6 +61,7 @@ class RoomSpec:
     participation: ParticipationPolicy
     priority: float
     schedule_entity: str | None
+    band: float | None  # None = use the default
 
     def as_room_config(self) -> RoomConfig:
         """The planner's view of this room: where it is and how its unit behaves.
@@ -108,10 +109,14 @@ class IntentConfig:
     Both are checked against the setpoint range, because a target outside that
     range is silently clamped and the setting simply never takes effect --
     which looks exactly like a bug in the schedule.
+
+    ``band`` is how far above the heating target a room is content to sit
+    before it would rather be cooled. Zero is a single setpoint.
     """
 
     default_target: float
     away_target: float
+    band: float
 
 
 @dataclass(frozen=True)
@@ -385,11 +390,13 @@ def load(raw: object) -> SystemConfig:
     intent = IntentConfig(
         default_target=reader.number(raw_intent, "default_target", "defaults.intent"),
         away_target=reader.number(raw_intent, "away_target", "defaults.intent"),
+        band=reader.number(raw_intent, "band", "defaults.intent", minimum=0),
     )
     low, high = default_policy.setpoint_range
     for label, value in (
         ("default_target", intent.default_target),
         ("away_target", intent.away_target),
+        ("default_target + band", intent.default_target + intent.band),
     ):
         if not low <= value <= high:
             reader.fail(
@@ -457,6 +464,8 @@ def load(raw: object) -> SystemConfig:
         else:
             priority = 1.0
 
+        band = reader.number(body, "band", where, minimum=0) if "band" in body else None
+
         schedule = body.get("schedule_entity")
         if schedule is not None and (not isinstance(schedule, str) or not schedule.startswith("schedule.")):
             reader.fail(where, f"'schedule_entity' should look like schedule.something, found {schedule!r}")
@@ -472,6 +481,7 @@ def load(raw: object) -> SystemConfig:
                 participation=participation,
                 priority=priority,
                 schedule_entity=schedule,
+                band=band,
             )
         )
 

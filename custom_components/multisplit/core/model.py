@@ -104,13 +104,44 @@ class RoomMeasurement:
 
 @dataclass(frozen=True)
 class RoomIntent:
-    """What the room should be, and why. Never how to achieve it."""
+    """What the room should be, and why. Never how to achieve it.
+
+    ``target`` is the temperature to heat *to*. ``band`` is how far above it
+    the room is content to sit before it would rather be cooled, so the room
+    is satisfied anywhere in ``[target, target + band]`` and the pair is a
+    comfort band: "heat below 20, cool above 23, do not fuss in between".
+
+    This is the honest version of a unit's own dual setpoint. An indoor unit
+    set to a band decides heat or cool for itself, from its own room, with no
+    sight of the others sharing the compressor -- which on a multi-split is a
+    decision it has no business taking. Expressed here, the same intent is
+    arbitrated by the one component that can see the whole group.
+
+    A band of zero is a single setpoint, and behaves exactly as before.
+    """
 
     room: str
     target: float
+    band: float = 0.0
     source: str = "default"  # schedule | override | away | default
     expires_at: datetime | None = None
     priority: float = 1.0
+
+    @property
+    def heat_to(self) -> float:
+        return self.target
+
+    @property
+    def cool_to(self) -> float:
+        return self.target + max(0.0, self.band)
+
+    def target_for(self, mode: str | None) -> float:
+        """The setpoint to command for a given mode.
+
+        Heating aims at the bottom of the band and cooling at the top, so
+        neither drives the room further into the band than asked.
+        """
+        return self.cool_to if mode == COOL else self.heat_to
 
 
 @dataclass(frozen=True)
@@ -253,6 +284,8 @@ class RoomCommand:
     because: str
     wants: str | None = None
     unserved_for: timedelta = timedelta(0)
+    heat_to: float | None = None
+    cool_to: float | None = None
 
     @property
     def standing_by(self) -> bool:

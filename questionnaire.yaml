@@ -402,6 +402,31 @@ sections:
         target: defaults.intent.default_target
         answer: 20.0
 
+      - id: comfort_band
+        ask: How far above the heating target may a room sit before it would rather be cooled?
+        why: >-
+          Zero is a single setpoint and behaves as it always has. Any wider and
+          the pair becomes a comfort band -- heat below 20, cool above 23, do
+          not fuss in between -- which is usually closer to what someone
+          actually wants, because it says where they are indifferent.
+
+          This is the honest version of setting a unit to its own dual
+          setpoint. A unit set to a band decides heat or cool for itself, from
+          its own room, with no sight of the others sharing the compressor --
+          a decision it has no business taking on a multi-split, since
+          choosing costs every other room its mode. Expressed here, the same
+          intent is arbitrated by the one component that can see the whole
+          group, against the lockouts and the duty cycle, with a reason.
+
+          Heating aims at the bottom of the band and cooling at the top, so
+          neither drives the room further into it than asked. A room may
+          override this with its own `band`.
+        type: number
+        unit: degrees
+        target: defaults.intent.band
+        answer: null
+        assume: 0.0
+
       - id: away_target
         ask: What should a room aim for when the house is unoccupied?
         why: >-

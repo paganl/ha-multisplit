@@ -48,11 +48,14 @@ def resolve(
     out: dict[str, RoomIntent] = {}
 
     for room in config.rooms:
+        band = config.intent.band if room.band is None else room.band
+
         override = overrides.get(room.key)
         if override is not None and override.active(now):
             out[room.key] = RoomIntent(
                 room=room.key,
                 target=override.target,
+                band=band,
                 source="override",
                 expires_at=override.expires_at,
                 priority=room.priority,
@@ -74,6 +77,7 @@ def resolve(
         out[room.key] = RoomIntent(
             room=room.key,
             target=target,
+            band=band,
             source=source,
             expires_at=None,
             priority=room.priority,

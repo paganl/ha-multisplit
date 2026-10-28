@@ -8,6 +8,8 @@ because the planner is a pure function.
 
 from datetime import datetime, timedelta, timezone
 
+import pytest
+
 from core.model import (
     COOL,
     HEAT,
@@ -545,3 +547,110 @@ def test_a_room_waiting_its_turn_still_accrues_starvation():
     assert bedroom.unserved_since == NOW, "the room that lost the argument is waiting its turn"
     office = next(r for r in result.runtime if r.room == "office")
     assert office.unserved_since is None, "the room being served is not starved"
+
+
+# --------------------------------------------------------------------------
+# The comfort band
+# --------------------------------------------------------------------------
+
+
+def banded(room, target, band):
+    return {room: RoomIntent(room, target, band=band)}
+
+
+#: Stated explicitly so the arithmetic in these tests is readable: a room is
+#: satisfied within 0.3° and tolerates 1.5° of overshoot before it would ask
+#: for the opposite mode.
+BANDED_LIMITS = Constraints(deadband=0.3, overshoot_tolerance=1.5)
+
+
+def run_banded(temps, *, band, outdoor=7.0, group_mode=None, runtime=None, now=NOW):
+    rooms = configs("office")
+    return plan(
+        rooms=rooms,
+        measurements={
+            name: RoomMeasurement(name, value, source="test") for name, value in temps.items()
+        },
+        intents={"office": RoomIntent("office", 20.0, band=band)},
+        constraints={"a": BANDED_LIMITS},
+        runtime=runtime or {},
+        group_state={"a": GroupState("a", group_mode, NOW - timedelta(hours=3))},
+        outdoor=outdoor,
+        now=now,
+    )
+
+
+def test_a_room_inside_its_band_wants_nothing():
+    """"Heat below 20, cool above 23, do not fuss in between"."""
+    for temperature in (20.0, 21.5, 23.0):
+        result = run_banded({"office": temperature}, band=3.0)
+        assert result.room("office").wants is None, f"{temperature}° is inside the band"
+        assert "between 20° and 23°" in result.room("office").because
+
+
+def test_a_room_below_its_band_wants_heat_and_aims_at_the_bottom():
+    result = run_banded({"office": 19.0}, band=3.0)
+    command = result.room("office")
+    assert command.wants == HEAT
+    assert command.target == 20.0, "heating aims at the bottom, not through the band"
+
+
+def test_a_room_above_its_band_wants_cool_and_aims_at_the_top():
+    result = run_banded({"office": 24.0}, band=3.0)
+    command = result.room("office")
+    assert command.wants == COOL
+    assert command.target == 23.0, "cooling aims at the top, not through the band"
+
+
+def test_demand_is_the_distance_outside_the_band_not_from_a_midpoint():
+    """A room 1° below a wide band is as needy as one 1° below a narrow one."""
+    narrow = run_banded({"office": 19.0}, band=0.0)
+    wide = run_banded({"office": 19.0}, band=6.0)
+    assert narrow.group("a").scores[HEAT] == pytest.approx(wide.group("a").scores[HEAT])
+
+
+def test_a_band_of_zero_is_exactly_a_single_setpoint():
+    for temperature in (18.0, 20.0, 22.0):
+        banded_result = run_banded({"office": temperature}, band=0.0)
+        plain = run(
+            configs("office"),
+            {"office": temperature},
+            {"office": 20.0},
+            constraints=BANDED_LIMITS,
+        )
+        assert banded_result.room("office").wants == plain.room("office").wants
+        assert banded_result.room("office").mode == plain.room("office").mode
+
+
+def test_the_band_absorbs_the_overshoot_tolerance_rather_than_adding_to_it():
+    """Otherwise the same separation is counted twice.
+
+    A room parked at the top of its band by the duty cycle must clear the band
+    to ask for cooling — but a 3° band is already wider than the 1.5° of
+    tolerated overshoot, so the tolerance must not be stacked on top of it.
+    """
+    # Heating delivered, band 3°: cooling is wanted just past 23° + deadband.
+    assert run_banded({"office": 23.1}, band=3.0, group_mode=HEAT).room("office").wants is None
+    assert run_banded({"office": 23.4}, band=3.0, group_mode=HEAT).room("office").wants == COOL
+
+    # With no band, the full tolerance applies: 20 + 0.3 + 1.5 = 21.8.
+    assert run_banded({"office": 21.7}, band=0.0, group_mode=HEAT).room("office").wants is None
+    assert run_banded({"office": 22.0}, band=0.0, group_mode=HEAT).room("office").wants == COOL
+
+
+def test_the_cut_off_is_measured_from_the_end_being_worked_towards():
+    """Heating stops 1.5° above the bottom of the band, not above the top."""
+    running = {
+        "office": RoomRuntime("office", running=True, mode=HEAT, since=NOW - timedelta(minutes=30))
+    }
+    # Outdoor 0°, where the measured cut-off offset is +0.3.
+    short = run_banded(
+        {"office": 20.2}, band=3.0, outdoor=0.0, group_mode=HEAT, runtime=running
+    )
+    assert short.room("office").mode == HEAT
+
+    past = run_banded(
+        {"office": 20.4}, band=3.0, outdoor=0.0, group_mode=HEAT, runtime=running
+    )
+    assert past.room("office").standing_by
+    assert "past the cut-off of 20.3" in past.room("office").because

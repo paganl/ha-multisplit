@@ -294,6 +294,23 @@ defaults:
     # or an away state. Every room shares it until per-room schedules exist.
     # Units: °C.
     default_target: 20.0
+    # How far above the heating target may a room sit before it would rather be cooled?
+    # Zero is a single setpoint and behaves as it always has. Any wider and
+    # the pair becomes a comfort band -- heat below 20, cool above 23, do not
+    # fuss in between -- which is usually closer to what someone actually
+    # wants, because it says where they are indifferent. This is the honest
+    # version of setting a unit to its own dual setpoint. A unit set to a band
+    # decides heat or cool for itself, from its own room, with no sight of the
+    # others sharing the compressor -- a decision it has no business taking on
+    # a multi-split, since choosing costs every other room its mode. Expressed
+    # here, the same intent is arbitrated by the one component that can see
+    # the whole group, against the lockouts and the duty cycle, with a reason.
+    # Heating aims at the bottom of the band and cooling at the top, so
+    # neither drives the room further into it than asked. A room may override
+    # this with its own `band`.
+    # Units: degrees.
+    # UNMEASURED — assumed; the question was left blank.
+    band: 0.0
     # What should a room aim for when the house is unoccupied?
     # The setback. It must sit inside the setpoint range above, or it is
     # clamped and never takes effect -- the loader checks this, because a

@@ -1,5 +1,34 @@
 # Changelog
 
+## 0.2.0 — 2026-10-28
+
+**Added**
+
+- **A comfort band.** A room can be given a range rather than a point: heat
+  below 20, cool above 23, do not fuss in between. `defaults.intent.band` sets
+  it, and a room may override it with its own `band`.
+
+  This is the honest version of setting a unit to its own dual setpoint. A
+  unit set to a band decides heat or cool for itself, from its own room, with
+  no sight of the others sharing the compressor — a decision it has no
+  business taking on a multi-split, where choosing costs every other room its
+  mode. Expressed as intent, the same thing is arbitrated by the one component
+  that can see the whole group, against the lockouts and the duty cycle, with
+  a reason.
+
+  Heating aims at the bottom of the band and cooling at the top, so neither
+  drives the room further into it than asked. The cut-off is measured from the
+  end being worked towards, so heating stops 1.5 °C above the *bottom*. Demand
+  is the distance outside the band, so a room 1 °C short of a wide band is
+  exactly as needy as one 1 °C short of a narrow one.
+
+  The band also absorbs the overshoot tolerance rather than adding to it: a
+  band wider than the tolerated overshoot already provides that separation,
+  and stacking them would count it twice.
+
+  **A band of zero is a single setpoint and behaves exactly as before**, which
+  is the shipped default.
+
 ## 0.1.10 — 2026-10-27
 
 **Added**
