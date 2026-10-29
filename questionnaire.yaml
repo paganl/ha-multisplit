@@ -198,8 +198,17 @@ sections:
         target: groups
         key_field: key
         answer:
+          # MXZ-2F53VF5: heating 1.0–7.0 kW, cooling 1.1–5.6 kW. A low minimum,
+          # so a single room on this unit can run gently.
           - key: a
             name: Group A
+          # MXZ-3F54VF5: heating 2.6–9.0 kW, cooling 2.9–6.8 kW. The minimum is
+          # 2.6× Group A's, so one room calling alone gets far more than it needs
+          # and overshoots. Expect these rooms to need their own cut-off and rest
+          # values once tools/fit_curves.py has field data -- the 1.5° default
+          # was one house-wide setting, never measured per group.
+          # Both units: cooling rated -10 to +46 °C outdoor, heating -15 to +24 °C
+          # (figures from the VF4 data sheets; confirm against the VF5 manual).
           - key: b
             name: Group B
 
