@@ -20,7 +20,17 @@ untrue — and a room that cannot have what it asked for should be able to say
   and overshoots. It is stopped past a measured threshold and rested for a
   period that depends on the outdoor temperature.
 - **Refuses what the weather forbids**, with hysteresis so it cannot flap, and
-  says so in words rather than just doing nothing.
+  says so in words rather than just doing nothing. An outdoor sensor that
+  drops out never lifts a lockout.
+- **Works to a comfort band, not a point.** Heat below 20, cool above 22, do
+  not fuss in between — arbitrated across the whole outdoor unit rather than
+  left to each indoor unit's own dual setpoint.
+- **Banks solar surplus.** While the house is exporting, rooms heat a little
+  further into their band, so the building stores energy that would otherwise
+  be sold back cheaply.
+- **Fails safe on bad readings.** An idle room never starts on a stale or
+  missing temperature; a running one keeps its last decision for a short grace
+  and then stops.
 - **Explains itself.** Every decision carries the reason produced by the code
   that made it. `multisplit.explain` answers "why is this room standing by?".
 
@@ -80,10 +90,69 @@ Assistant logs a warning naming the line to add.
 Where an answer is genuinely unknown the questionnaire states an assumption
 and the generated line is marked `UNMEASURED`.
 
+### The comfort band
+
+`defaults.intent` sets the target and the band above it: with
+`default_target: 20` and `band: 2`, a room heats below 20, cools above 22 and
+is left alone in between. Heating aims at the bottom of the band and cooling
+at the top. A room may set its own `band`. A band of zero is a single
+setpoint.
+
+### Upgrading
+
+Copy the new `multisplit.yaml` across too, or open **Configure** once, which
+regenerates it from your answers. An older file still loads: settings added
+since it was written take their defaults, chosen to behave as before, and each
+one is logged as a warning naming the line to add, e.g.
+
+```
+multisplit: defaults.intent.band is not set; using 0, the default since 0.2.0. Add 'band: 0' to make it explicit.
+```
+
 ### Going live
 
 Set `apply_to_hardware` to true — through Configure, or in the questionnaire
 and regenerate. Until then nothing is written to any unit.
+
+## Solar surplus
+
+Heat is cheapest to make when it is the house's own surplus, and the building
+stores it: a room heated to the top of its band in the afternoon needs less
+from the grid in the evening. In the Netherlands this matters more from
+1 January 2027, when net metering (*salderingsregeling*) ends and exported
+power is worth far less than imported.
+
+```yaml
+energy:
+  surplus_sensor: binary_sensor.exporting_to_grid   # on while exporting; null for none
+  settle_minutes: 10
+defaults:
+  policy:
+    solar_boost: 1.0     # degrees into the band while on surplus; 0 turns it off
+  intent:
+    band: 2.0            # banking needs a band to bank into
+```
+
+While the sensor is on, heating aims `solar_boost` above the bottom of the
+band, and cooling the same below the top, never past the other end. With the
+values above, a room holds 20° on the grid and heats to 21° on surplus.
+
+The rules that keep it safe:
+
+- **Only while one mode is permitted.** Narrowing the band with both heating
+  and cooling open would invite the two to fight, so then it declines and says
+  why.
+- **Settled both ways.** The sensor must hold a state for `settle_minutes`
+  before the plan follows it. Banking uses the surplus, so export can stop
+  *because* banking started; without the settle the two would oscillate.
+- **Unknown is no surplus.** An unavailable sensor, or a restart before the
+  sensor has settled, means the plan behaves exactly as it would without this.
+
+It never touches the lockouts, the duty cycle or the minimum run and rest
+times. Reasons say when it applies:
+`heating — 20.5° against a target of 21° (banking solar: 1° into the band)`,
+and `multisplit.explain` shows the surplus state and any change it is waiting
+on.
 
 ## Telemetry
 
@@ -172,24 +241,25 @@ Each cycle is also fired as a `multisplit_cycle` event, and the diagnostics
 download from the device page carries the configuration as loaded, the recent
 cycles with their reasons and scores, and the observed overshoot points.
 
-### Banking solar surplus
-
-With `energy.surplus_sensor` set to a binary sensor that is on while the house
-exports, a room on surplus works `solar_boost` degrees into its comfort band —
-heating aims above the bottom, cooling below the top, never past the other end
-— so the building stores energy while it is the house's own. It applies only
-while one mode is permitted, does nothing with a band of zero, and follows the
-sensor only once it has held for `settle_minutes`. Reasons say so:
-`heating — 20.5° against a target of 21° (banking solar: 1° into the band)`.
-
-To see which decisions banking would change in recorded telemetry:
+### Replaying it
 
 ```bash
+python3 tools/replay.py multisplit-telemetry.jsonl
+python3 tools/replay.py multisplit-telemetry.jsonl --outdoor 21.5
 python3 tools/replay.py multisplit-telemetry.jsonl --surplus on
 ```
 
-That shows what the planner would have *asked for*; whether it saved anything
-has to come from running it, in shadow mode first.
+Feeds recorded cycles back through the planner with the state threaded as the
+coordinator does, so a change to the code or the config can be tested against
+real history. Unchanged, it reproduces the logged decisions exactly. With one
+fact forced — the outdoor temperature, the solar surplus, or
+`--freshness availability` — it shows what the planner would have decided
+instead: how often each group changes mode, any heat-against-cool conflict,
+and any room dropped mid-cycle on a stale sensor.
+
+It is open loop, and honest only because the log was taken in shadow mode: it
+shows what the planner would have *asked for*, not how warm the rooms would
+then have become.
 
 ### Divergence
 
@@ -222,7 +292,7 @@ happening.
 
 | Service | What it does |
 | --- | --- |
-| `multisplit.explain` | everything the system believes right now, and why |
+| `multisplit.explain` | everything the system believes right now, and why — including the solar surplus state |
 | `multisplit.set_room_target` | override a room's target, optionally until a time |
 | `multisplit.clear_override` | back to the schedule or default |
 | `multisplit.reload` | re-read `multisplit.yaml` without restarting |
@@ -235,6 +305,7 @@ custom_components/multisplit/
     model.py       frozen dataclasses
     planner.py     every decision, as a pure function
     policy.py      what is permitted, and why not
+    energy.py      the solar surplus, settled against passing clouds
     config.py      validated mapping → model
   measurement.py   which sensor to believe, and whether to
   comfort.py       override → schedule → default
@@ -242,9 +313,11 @@ custom_components/multisplit/
   coordinator.py   the tick: gather, plan, reconcile
   telemetry.py     one record per cycle, so the curves can be refitted
   config_flow.py   setup, and the questionnaire rendered as a form
+  generate.py      questionnaire → config, shared by the form and build_config
 tools/
   build_config.py  questionnaire → multisplit.yaml
   fit_curves.py    telemetry → a suggested curve
+  replay.py        telemetry → the decisions again, with one fact changed
 ```
 
 The planner decides everything and writes nothing; the reconciler writes
@@ -264,6 +337,7 @@ up in the right mode at the wrong temperature cannot be expressed.
 - [DESIGN-v3.md](DESIGN-v3.md) — the architecture and why it is shaped this way
 - [BUILD-v3.md](BUILD-v3.md) — what gets built, in what order
 - [HARVEST.md](HARVEST.md) — the measured values, and what is still unanswered
+- [CHANGELOG.md](CHANGELOG.md) — what changed in each release, and why
 - [ARCHITECTURE.md](ARCHITECTURE.md) — review of the system this replaces
 
 ## Dashboard
