@@ -350,8 +350,7 @@ defaults:
     # neither drives the room further into it than asked. A room may override
     # this with its own `band`.
     # Units: degrees.
-    # UNMEASURED — assumed; the question was left blank.
-    band: 0.0
+    band: 2.0
     # What should a room aim for when the house is unoccupied?
     # The setback. It must sit inside the setpoint range above, or it is
     # clamped and never takes effect -- the loader checks this, because a

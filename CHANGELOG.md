@@ -31,6 +31,13 @@
   always written. `tools/replay.py --surplus on|off` replays with the signal
   forced, and banked cycles replay exactly.
 
+**Changed**
+
+- **The shipped comfort band is 2°** (was 0, a single setpoint): heat below
+  20°, cool above 22°. It gives banking room to work — on surplus a room heats
+  to 21°, on the grid it holds 20° as before — and it also stops cooling
+  aiming at 20° once cooling is permitted.
+
 ## 0.3.1 — 2026-10-29
 
 **Fixed**

@@ -464,7 +464,7 @@ sections:
         type: number
         unit: degrees
         target: defaults.intent.band
-        answer: null
+        answer: 2.0
         assume: 0.0
 
       - id: away_target
