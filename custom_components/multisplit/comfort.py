@@ -9,8 +9,9 @@ as a voice platform and raises AttributeError on every start. The types keep
 the project's vocabulary -- ``RoomIntent``, ``intent_source`` -- only the file
 is renamed.
 
-Resolution order, most specific first: an unexpired override, then the room's
-schedule, then the configured default. The source is carried through to the UI
+Resolution order, most specific first: an unexpired override, then away (the
+house-wide switch or the room's own presence entity), then the room's weekly
+schedule, then the configured default -- see ``core.schedule.choose_target``. The source is carried through to the UI
 so a room can say *why* it is aiming at what it is aiming at -- "override
 until 21:30" and "schedule" look identical on a thermostat, and that ambiguity
 is most of what makes a heating system feel haunted.
@@ -22,9 +23,11 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from homeassistant.core import HomeAssistant
+from homeassistant.util import dt as dt_util
 
 from .core.config import SystemConfig
 from .core.model import RoomIntent
+from .core.schedule import WeekSchedule, choose_target
 
 
 @dataclass(frozen=True)
@@ -43,43 +46,44 @@ def resolve(
     config: SystemConfig,
     overrides: dict[str, Override],
     now: datetime,
+    *,
+    schedules: dict[str, WeekSchedule] | None = None,
+    away: bool = False,
 ) -> dict[str, RoomIntent]:
-    """One intent per room."""
+    """One intent per room: override, then away, then schedule, then default.
+
+    ``now`` is UTC; schedules are wall-clock, so they are read in local time.
+    """
+    schedules = schedules or {}
+    local = dt_util.as_local(now)
     out: dict[str, RoomIntent] = {}
 
     for room in config.rooms:
         band = config.intent.band if room.band is None else room.band
 
         override = overrides.get(room.key)
-        if override is not None and override.active(now):
-            out[room.key] = RoomIntent(
-                room=room.key,
-                target=override.target,
-                band=band,
-                source="override",
-                expires_at=override.expires_at,
-                priority=room.priority,
-            )
-            continue
+        live = override if override is not None and override.active(now) else None
 
-        target = config.intent.default_target
-        source = "default"
-
+        room_away = False
         if room.schedule_entity:
             state = hass.states.get(room.schedule_entity)
-            if state is not None and state.state in ("on", "off"):
-                if state.state == "on":
-                    source = "schedule"
-                else:
-                    target = config.intent.away_target
-                    source = "schedule (away)"
+            room_away = state is not None and state.state == "off"
 
+        target, source = choose_target(
+            override=live.target if live else None,
+            house_away=away,
+            room_away=room_away,
+            schedule=schedules.get(room.key, WeekSchedule()),
+            local=local.replace(tzinfo=None),
+            default=config.intent.default_target,
+            away=config.intent.away_target,
+        )
         out[room.key] = RoomIntent(
             room=room.key,
             target=target,
             band=band,
             source=source,
-            expires_at=None,
+            expires_at=live.expires_at if live else None,
             priority=room.priority,
         )
 

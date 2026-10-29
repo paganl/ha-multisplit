@@ -13,7 +13,8 @@ from datetime import datetime
 from pathlib import Path
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant, callback
+from homeassistant.core import Context, HomeAssistant, callback
+from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers.event import async_track_state_change_event
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from homeassistant.util import dt as dt_util
@@ -27,6 +28,16 @@ from .core.planner import plan as make_plan
 from .core.energy import SurplusLatch
 from .core.policy import constraints_for
 from .comfort import Override
+from .core.model import RoomIntent
+from .core.schedule import (
+    Mark,
+    ScheduleError,
+    WeekSchedule,
+    check as check_schedule,
+    may_edit,
+    target_problem,
+)
+from .store import StateStore
 from .reconciler import Reconciler
 from .telemetry import EVENT_CYCLE, Telemetry, record_for
 
@@ -53,6 +64,9 @@ class MultisplitCoordinator(DataUpdateCoordinator[Plan]):
         self.telemetry = Telemetry(config.telemetry, Path(hass.config.path("")))
 
         self.overrides: dict[str, Override] = {}
+        self.store = StateStore(hass)
+        self.schedules: dict[str, WeekSchedule] = {}
+        self.intents: dict[str, RoomIntent] = {}
         self.excluded: set[str] = set()
         self.pending: tuple[str, ...] = ()
         self.actions: tuple[str, ...] = ()
@@ -131,7 +145,15 @@ class MultisplitCoordinator(DataUpdateCoordinator[Plan]):
         surplus_reading = measurement.read_surplus(self.hass, self.config)
         surplus = self.surplus.update(surplus_reading, now)
         measurements = measurement.collect(self.hass, self.config, now)
-        intents = comfort.resolve(self.hass, self.config, self.overrides, now)
+        intents = comfort.resolve(
+            self.hass,
+            self.config,
+            self.overrides,
+            now,
+            schedules=self.schedules,
+            away=self.store.away,
+        )
+        self.intents = intents
 
         self._constraints = {
             group.key: constraints_for(
@@ -200,6 +222,7 @@ class MultisplitCoordinator(DataUpdateCoordinator[Plan]):
             intents=intents,
             surplus=surplus,
             surplus_reading=surplus_reading,
+            away=self.away,
         )
         self.telemetry.remember(record)
 
@@ -256,11 +279,95 @@ class MultisplitCoordinator(DataUpdateCoordinator[Plan]):
     def measurement_for(self, room: str):
         return measurement.collect(self.hass, self.config, dt_util.utcnow()).get(room)
 
+    # ------------------------------------------------------------------
+    # What people set: schedules, away, overrides
+    # ------------------------------------------------------------------
+
+    async def async_load_state(self) -> None:
+        """Read stored schedules and away before the first cycle."""
+        await self.store.async_load()
+        self.schedules = self.store.schedules(self.config)
+
+    @property
+    def away(self) -> bool:
+        return self.store.away
+
+    async def async_set_away(self, away: bool) -> None:
+        """Leaving or coming back resets manual overrides.
+
+        An override from this morning should not keep one room at 22° all the
+        time the house is empty, and one set while away (someone home early)
+        has served its purpose once the house is occupied again.
+        """
+        if away == self.store.away:
+            return
+        self.store.set_away(away)
+        self.overrides.clear()
+        _LOGGER.info("multisplit: away %s; manual overrides cleared", "on" if away else "off")
+        await self.async_request_refresh()
+
+    def next_change(self, room: str) -> datetime | None:
+        """When this room's schedule next moves, in local time; None without one."""
+        schedule = self.schedules.get(room)
+        if schedule is None or schedule.empty:
+            return None
+        return schedule.next_change(dt_util.as_local(dt_util.utcnow()))
+
+    async def async_set_schedule(
+        self,
+        room: str,
+        days: list[str],
+        marks: list[Mark],
+        context: Context | None,
+    ) -> None:
+        """Replace some days of a room's week, if this person may and it is safe."""
+        spec = next(r for r in self.config.rooms if r.key == room)
+        user = (
+            await self.hass.auth.async_get_user(context.user_id)
+            if context is not None and context.user_id
+            else None
+        )
+        if not may_edit(
+            spec.owner,
+            user_id=context.user_id if context else None,
+            user_name=user.name if user else None,
+            is_admin=bool(user and user.is_admin),
+        ):
+            raise ServiceValidationError(
+                f"{spec.name}'s schedule can only be changed by "
+                f"{spec.owner + ' or ' if spec.owner else ''}an administrator"
+            )
+        current = self.schedules.get(room, WeekSchedule())
+        try:
+            updated = current.with_days(days, marks)
+            check_schedule(updated, self.config.guardrails(room))
+        except ScheduleError as error:
+            raise ServiceValidationError(
+                f"{spec.name}'s schedule was not saved: " + "; ".join(error.problems)
+            ) from error
+        self.store.set_schedule(room, updated)
+        self.schedules[room] = updated
+        _LOGGER.info(
+            "multisplit: schedule for %s changed (%s) by %s",
+            room,
+            ", ".join(days),
+            user.name if user else "Home Assistant",
+        )
+        await self.async_request_refresh()
+
     async def async_set_override(
         self, room: str, target: float, until: datetime | None
     ) -> None:
+        problem = target_problem(target, self.config.guardrails(room))
+        if problem:
+            name = next(r.name for r in self.config.rooms if r.key == room)
+            raise ServiceValidationError(f"{name}: {problem}")
         self.overrides[room] = Override(target=target, expires_at=until)
         await self.async_request_refresh()
+
+    async def async_set_from_thermostat(self, room: str, target: float) -> None:
+        """A thermostat turned by hand holds until the schedule next moves."""
+        await self.async_set_override(room, target, self.next_change(room))
 
     async def async_clear_override(self, room: str) -> None:
         self.overrides.pop(room, None)
@@ -307,6 +414,12 @@ class MultisplitCoordinator(DataUpdateCoordinator[Plan]):
                 "because": command.because,
                 "wants": command.wants,
                 "unserved_for_minutes": round(command.unserved_for.total_seconds() / 60, 1),
+                "target_source": (
+                    intent.source if (intent := self.intents.get(command.room)) else None
+                ),
+                "next_schedule_change": (
+                    change.isoformat() if (change := self.next_change(command.room)) else None
+                ),
             }
             for command in plan.rooms
             if room is None or command.room == room
@@ -314,6 +427,7 @@ class MultisplitCoordinator(DataUpdateCoordinator[Plan]):
         return {
             "at": plan.at.isoformat(),
             "apply_to_hardware": self.config.operation.apply_to_hardware,
+            "away": self.away,
             "energy": (
                 self.surplus.describe(plan.at)
                 if self.config.energy.surplus_sensor

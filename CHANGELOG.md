@@ -1,5 +1,45 @@
 # Changelog
 
+## 0.5.0 — 2026-10-29
+
+Rooms now follow schedules set by the people whose rooms they are. Seen in
+two days of shadow-mode telemetry: the household ran the bedrooms at 16–18°,
+the office at 20° by day and 18° at night, and the living room at 22°, while
+the planner gave every room the same 20°.
+
+**Added**
+
+- **Weekly schedules per room**, edited on a new dashboard card: one line per
+  day, a mark wherever the temperature should change, holding until the next
+  mark across midnight and round the week. Tap to drop a mark, drag to move
+  it, copy a day to the weekdays, the weekend or every day. The integration
+  serves the card itself — no separate install, no dashboard resource.
+- **Owners.** A room may name its `owner`; they and administrators may edit
+  its schedule, everyone else sees it read-only. No owner means admins only.
+- **Guardrails**, enforced by the integration whatever the route: every mark
+  inside the room's `min_target`/`max_target`, and no setting shorter than
+  `min_block_minutes` (default 30), wrapping the week. The card shows a
+  problem as it is made and will not save it. The configuration refuses a room
+  range that would exclude the shared default or away target.
+- **Away mode**: `switch.multisplit_away` sets every room to the away target,
+  survives restarts, and clears manual overrides when switched either way. A
+  room turned up by hand while away still heats.
+- `multisplit.set_schedule` service; `explain`, the room entities and
+  telemetry now say where each target came from (`override`, `away`,
+  `schedule`, `default`), and telemetry records `away`.
+
+**Changed**
+
+- **A thermostat turned by hand now holds until the room's schedule next
+  changes**, not indefinitely. With no schedule it still holds until cleared.
+  `multisplit.set_room_target` is unchanged.
+- Requires Home Assistant 2024.7 or later, for serving the card.
+
+**Fixed**
+
+- The shipped `multisplit.yaml` had Ischa's entity as `…_ischa_climat`; it is
+  regenerated from the corrected questionnaire.
+
 ## 0.4.0 — 2026-10-29
 
 **Added**

@@ -1,4 +1,5 @@
-# A dashboard for the integration, using built-in cards only.
+# A dashboard for the integration: built-in cards, plus the schedule card the
+# integration serves itself (nothing to install, no resource to add).
 #
 # Paste the `views:` entry below into Settings -> Dashboards -> your dashboard
 # -> Edit -> three dots -> Raw configuration editor, and change the entity ids
@@ -77,6 +78,14 @@ views:
       # takes the room out of the plan entirely, so it stops asking for
       # anything and stops counting towards its group's decision.
       # -------------------------------------------------------------------
+      # -------------------------------------------------------------------
+      # Schedules. One line per day for each room; tap a line to drop a
+      # mark, drag it to move it. Owners edit their own room, admins any.
+      # Lists every multi-split room by itself; add `entities:` to choose.
+      # The Away button on it flips switch.multisplit_away.
+      # -------------------------------------------------------------------
+      - type: custom:multisplit-schedule-card
+
       - type: thermostat
         entity: climate.living_room
         features:

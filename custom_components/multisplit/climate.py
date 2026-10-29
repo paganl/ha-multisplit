@@ -55,7 +55,13 @@ class RoomClimate(MultisplitRoomEntity, ClimateEntity):
     )
     _attr_target_temperature_step = 0.5
     _unrecorded_attributes = frozenset(
-        {"reason", "wants", "heat_to", "cool_to", "group", "group_mode", "group_reason"}
+        {
+            "reason", "wants", "heat_to", "cool_to", "group", "group_mode", "group_reason",
+            # What the schedule card reads. Worth having now, not as history.
+            "room", "owner", "min_target", "max_target", "min_block_minutes", "schedule",
+            "target_source", "override_until", "next_schedule_change", "away",
+            "default_target", "away_target",
+        }
     )
 
     def __init__(self, coordinator: MultisplitCoordinator, room: str) -> None:
@@ -102,6 +108,33 @@ class RoomClimate(MultisplitRoomEntity, ClimateEntity):
 
     @property
     def extra_state_attributes(self) -> dict:
+        return {**self._schedule_attributes(), **self._plan_attributes()}
+
+    def _schedule_attributes(self) -> dict:
+        """Everything the schedule card needs, so it needs nothing else."""
+        coordinator = self.coordinator
+        spec = self._spec
+        intent = coordinator.intents.get(self._room)
+        change = coordinator.next_change(self._room)
+        schedule = coordinator.schedules.get(self._room)
+        return {
+            "room": self._room,
+            "owner": spec.owner,
+            "min_target": spec.min_target,
+            "max_target": spec.max_target,
+            "min_block_minutes": int(coordinator.config.intent.min_block.total_seconds() // 60),
+            "default_target": coordinator.config.intent.default_target,
+            "away_target": coordinator.config.intent.away_target,
+            "schedule": schedule.as_dict() if schedule is not None else {},
+            "target_source": intent.source if intent else None,
+            "override_until": (
+                intent.expires_at.isoformat() if intent and intent.expires_at else None
+            ),
+            "next_schedule_change": change.isoformat() if change else None,
+            "away": coordinator.away,
+        }
+
+    def _plan_attributes(self) -> dict:
         plan = self.coordinator.data
         if plan is None or self.coordinator.is_excluded(self._room):
             return {"reason": "excluded from control at this room's request"}
@@ -122,7 +155,8 @@ class RoomClimate(MultisplitRoomEntity, ClimateEntity):
         temperature = kwargs.get(ATTR_TEMPERATURE)
         if temperature is None:
             return
-        await self.coordinator.async_set_override(self._room, float(temperature), None)
+        # Turned by hand: holds until the room's schedule next moves.
+        await self.coordinator.async_set_from_thermostat(self._room, float(temperature))
 
     async def async_set_hvac_mode(self, hvac_mode: HVACMode) -> None:
         if hvac_mode == HVACMode.OFF:

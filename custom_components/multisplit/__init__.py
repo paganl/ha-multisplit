@@ -7,6 +7,7 @@ threshold, a curve, an entity id or a room name.
 
 from __future__ import annotations
 
+import json
 import logging
 from pathlib import Path
 
@@ -38,12 +39,16 @@ from .const import (
     SERVICE_EXPLAIN,
     SERVICE_RELOAD,
     SERVICE_SET_ROOM_TARGET,
+    SERVICE_SET_SCHEDULE,
+    CARD_FILE,
+    CARD_URL,
     MANUFACTURER,
     group_device_id,
     room_device_id,
 )
 from .coordinator import MultisplitCoordinator
 from .core.config import ConfigError, SystemConfig
+from .core.schedule import DAYS, Mark, parse_time
 from .core.naming import describe_missing
 from .yaml_config import load_file
 
@@ -61,6 +66,33 @@ SET_ROOM_TARGET_SCHEMA = vol.Schema(
     }
 )
 ROOM_SCHEMA = vol.Schema({vol.Required(ATTR_ROOM): cv.string})
+
+
+def _time(value):
+    try:
+        parse_time(value)
+    except ValueError as error:
+        raise vol.Invalid(str(error)) from error
+    return value
+
+
+SET_SCHEDULE_SCHEMA = vol.Schema(
+    {
+        vol.Required(ATTR_ROOM): cv.string,
+        vol.Required("days"): vol.All(cv.ensure_list, [vol.In(DAYS)], vol.Length(min=1)),
+        vol.Required("marks"): vol.All(
+            cv.ensure_list,
+            [
+                vol.Schema(
+                    {
+                        vol.Required("at"): _time,
+                        vol.Required("temperature"): vol.Coerce(float),
+                    }
+                )
+            ],
+        ),
+    }
+)
 EXPLAIN_SCHEMA = vol.Schema({vol.Optional(ATTR_ROOM): cv.string})
 
 
@@ -104,6 +136,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     _async_register_devices(hass, entry, config)
 
     coordinator = MultisplitCoordinator(hass, entry, config)
+    await coordinator.async_load_state()
     await coordinator.async_config_entry_first_refresh()
     coordinator.async_watch_sources()
 
@@ -113,6 +146,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     entry.async_on_unload(entry.add_update_listener(_async_reload_entry))
 
     _async_register_services(hass)
+    await _async_register_card(hass)
 
     _async_check_entities_later(hass, entry, config)
 
@@ -124,6 +158,32 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         )
 
     return True
+
+
+async def _async_register_card(hass: HomeAssistant) -> None:
+    """Serve the schedule card and load it on every dashboard, once per run.
+
+    Shipping the card inside the integration is what lets HACS install it:
+    HACS treats a repository as one category, so a separate Lovelace card
+    would need a repository of its own, and a resource entry by hand.
+    """
+    if hass.data.get(f"{DOMAIN}_card"):
+        return
+    from homeassistant.components.frontend import add_extra_js_url
+    from homeassistant.components.http import StaticPathConfig
+
+    version = json.loads(
+        await hass.async_add_executor_job(
+            (Path(__file__).parent / "manifest.json").read_text, "utf-8"
+        )
+    )["version"]
+    await hass.http.async_register_static_paths(
+        [StaticPathConfig(CARD_URL, str(Path(__file__).parent / CARD_FILE), True)]
+    )
+    # The version busts the browser cache on upgrade; the file itself is
+    # served with long-lived cache headers.
+    add_extra_js_url(hass, f"{CARD_URL}?v={version}")
+    hass.data[f"{DOMAIN}_card"] = True
 
 
 @callback
@@ -238,6 +298,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 SERVICE_EXPLAIN,
                 SERVICE_SET_ROOM_TARGET,
                 SERVICE_CLEAR_OVERRIDE,
+                SERVICE_SET_SCHEDULE,
             ):
                 hass.services.async_remove(DOMAIN, service)
     return unloaded
@@ -291,6 +352,18 @@ def _async_register_services(hass: HomeAssistant) -> None:
             room, call.data["temperature"], call.data.get(ATTR_UNTIL)
         )
 
+    async def set_schedule(call: ServiceCall) -> None:
+        room = call.data[ATTR_ROOM]
+        marks = [
+            Mark(parse_time(item["at"]), float(item["temperature"]))
+            for item in call.data["marks"]
+        ]
+        if len({m.minute for m in marks}) != len(marks):
+            raise HomeAssistantError("two marks at the same time")
+        await _resolve(hass, room).async_set_schedule(
+            room, list(call.data["days"]), marks, call.context
+        )
+
     async def clear_override(call: ServiceCall) -> None:
         room = call.data[ATTR_ROOM]
         await _resolve(hass, room).async_clear_override(room)
@@ -308,4 +381,7 @@ def _async_register_services(hass: HomeAssistant) -> None:
     )
     hass.services.async_register(
         DOMAIN, SERVICE_CLEAR_OVERRIDE, clear_override, schema=ROOM_SCHEMA
+    )
+    hass.services.async_register(
+        DOMAIN, SERVICE_SET_SCHEDULE, set_schedule, schema=SET_SCHEDULE_SCHEMA
     )

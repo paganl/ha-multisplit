@@ -251,6 +251,12 @@ sections:
           sensor, which sits in the return air path and reads warm while
           heating -- it measures the unit, not the room, so every threshold
           inherits that bias.
+
+          Optional per room: `owner`, the Home Assistant user (name or id) who
+          may edit the room's schedule besides admins -- without one, only
+          admins can; and `min_target` / `max_target`, the range every target
+          for the room must sit in, schedule and thermostat alike -- without
+          them, the group's setpoint range.
         type: records
         target: rooms
         key_field: key
@@ -263,7 +269,6 @@ sections:
           - key: ischa
             name: Ischa's Bedroom
             group: a
-            # Ends in "climat", not "climate" -- confirm in Developer Tools → States.
             climate_entity: climate.mitsubishi_ac_ischa_mitsubishi_ac_ischa_climate
             temperature_sensors: []
           - key: bedroom
@@ -467,6 +472,19 @@ sections:
         answer: 2.0
         assume: 0.0
 
+
+      - id: min_block_minutes
+        ask: What is the shortest setting a room's schedule may contain?
+        why: >-
+          Measured from one mark to the next, wrapping the week. A schedule
+          that changes target every few minutes short-cycles a compressor
+          shared with other rooms, so a mark that would leave a shorter
+          setting is refused with a reason. Zero allows any length.
+        type: number
+        unit: minutes
+        target: defaults.intent.min_block_minutes
+        answer: null
+        assume: 30
       - id: away_target
         ask: What should a room aim for when the house is unoccupied?
         why: >-

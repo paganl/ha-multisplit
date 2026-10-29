@@ -28,6 +28,7 @@ from datetime import timedelta
 
 from .model import Curve, ParticipationPolicy, RoomConfig
 from .policy import PolicyConfig, participation_problems
+from .schedule import Guardrails
 
 
 #: Keys introduced after a release: key -> (version that added it, default).
@@ -40,6 +41,7 @@ ADDED_SINCE: dict[str, tuple[str, float | None]] = {
     "surplus_sensor": ("0.4.0", None),  # energy: no sensor, never banks
     "settle_minutes": ("0.4.0", 10.0),  # energy
     "solar_boost": ("0.4.0", 0.0),  # any policy block: zero never banks
+    "min_block_minutes": ("0.5.0", 30.0),  # defaults.intent
 }
 
 
@@ -80,6 +82,13 @@ class RoomSpec:
     priority: float
     schedule_entity: str | None
     band: float | None  # None = use the default
+    #: Who may edit this room's schedule besides admins: a Home Assistant
+    #: user name or user id. None means admins only.
+    owner: str | None = None
+    #: The range every target for this room must sit in -- schedule marks
+    #: and thermostat overrides alike. Defaults to the group's setpoint range.
+    min_target: float = 15.0
+    max_target: float = 26.0
 
     def as_room_config(self) -> RoomConfig:
         """The planner's view of this room: where it is and how its unit behaves.
@@ -149,6 +158,8 @@ class IntentConfig:
     default_target: float
     away_target: float
     band: float
+    #: The shortest setting a room's schedule may contain.
+    min_block: timedelta = timedelta(minutes=30)
 
 
 @dataclass(frozen=True)
@@ -176,6 +187,11 @@ class SystemConfig:
             if spec.key == key:
                 return spec
         raise KeyError(key)
+
+    def guardrails(self, room: str) -> Guardrails:
+        """What this room's schedule and overrides may contain."""
+        spec = next(r for r in self.rooms if r.key == room)
+        return Guardrails(spec.min_target, spec.max_target, self.intent.min_block)
 
     def rooms_in(self, group: str) -> tuple[RoomSpec, ...]:
         return tuple(r for r in self.rooms if r.group == group)
@@ -475,6 +491,11 @@ def load(raw: object) -> SystemConfig:
         default_target=reader.number(raw_intent, "default_target", "defaults.intent"),
         away_target=reader.number(raw_intent, "away_target", "defaults.intent"),
         band=reader.added_number(raw_intent, "band", "defaults.intent", minimum=0),
+        min_block=timedelta(
+            minutes=reader.added_number(
+                raw_intent, "min_block_minutes", "defaults.intent", minimum=0
+            )
+        ),
     )
     low, high = default_policy.setpoint_range
     for label, value in (
@@ -555,6 +576,41 @@ def load(raw: object) -> SystemConfig:
             reader.fail(where, f"'schedule_entity' should look like schedule.something, found {schedule!r}")
             schedule = None
 
+        owner = body.get("owner")
+        if owner is not None and (not isinstance(owner, str) or not owner.strip()):
+            reader.fail(where, f"'owner' must be a Home Assistant user name or id, found {owner!r}")
+            owner = None
+
+        # The room's range: configuration, not the owner's to change. Every
+        # target the room can be given must fit, including the shared default
+        # and setback, or it would be refused the first time it applied.
+        spec_group = next((g for g in groups if g.key == group), None)
+        low, high = (spec_group.policy if spec_group else default_policy).setpoint_range
+        min_target = reader.number(body, "min_target", where) if "min_target" in body else low
+        max_target = reader.number(body, "max_target", where) if "max_target" in body else high
+        if min_target >= max_target:
+            reader.fail(
+                where,
+                f"'min_target' of {min_target:g}° must be below 'max_target' of {max_target:g}°",
+            )
+        elif min_target < low or max_target > high:
+            reader.fail(
+                where,
+                f"the room's range {min_target:g}–{max_target:g}° goes outside the "
+                f"group's setpoint range {low:g}–{high:g}°",
+            )
+        else:
+            for label, value in (
+                ("default_target", intent.default_target),
+                ("away_target", intent.away_target),
+            ):
+                if not min_target <= value <= max_target:
+                    reader.fail(
+                        where,
+                        f"the shared {label} of {value:g}° is outside this room's "
+                        f"range {min_target:g}–{max_target:g}°",
+                    )
+
         rooms.append(
             RoomSpec(
                 key=key,
@@ -566,6 +622,9 @@ def load(raw: object) -> SystemConfig:
                 priority=priority,
                 schedule_entity=schedule,
                 band=band,
+                owner=owner.strip() if owner else None,
+                min_target=min_target,
+                max_target=max_target,
             )
         )
 

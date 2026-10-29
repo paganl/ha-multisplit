@@ -295,9 +295,63 @@ def test_only_keys_added_since_a_release_may_default():
 
     assert set(ADDED_SINCE) == {
         "band", "stale_grace_minutes", "surplus_sensor", "settle_minutes", "solar_boost",
+        "min_block_minutes",
     }
     assert ADDED_SINCE["band"][1] == 0.0
     assert timedelta(minutes=ADDED_SINCE["stale_grace_minutes"][1]) == PolicyConfig.stale_grace
     # Every 0.4.0 default must mean "behave as before": never bank.
     assert ADDED_SINCE["surplus_sensor"][1] is None
     assert ADDED_SINCE["solar_boost"][1] == PolicyConfig.solar_boost == 0.0
+
+
+# --------------------------------------------------------------------------
+# Schedules: who owns a room, and what its targets may be.
+# --------------------------------------------------------------------------
+
+
+def test_a_room_without_settings_is_admin_only_within_the_group_range():
+    config = load(GOOD)
+    room = config.rooms[0]
+    assert room.owner is None
+    assert (room.min_target, room.max_target) == config.groups[0].policy.setpoint_range
+    assert config.guardrails(room.key).min_block.total_seconds() == 30 * 60
+
+
+def test_a_room_can_name_its_owner_and_range():
+    import copy
+
+    raw = copy.deepcopy(GOOD)
+    raw["rooms"]["erin"].update(owner="Erin", min_target=16, max_target=21)
+    rails = load(raw).guardrails("erin")
+    assert (rails.min_target, rails.max_target) == (16.0, 21.0)
+    assert next(r for r in load(raw).rooms if r.key == "erin").owner == "Erin"
+
+
+def test_a_backwards_room_range_is_rejected():
+    import copy
+
+    raw = copy.deepcopy(GOOD)
+    raw["rooms"]["erin"].update(min_target=21, max_target=18)
+    with pytest.raises(ConfigError, match="must be below"):
+        load(raw)
+
+
+def test_a_room_range_that_excludes_the_shared_targets_is_rejected():
+    """The default would be refused the first time it applied to this room."""
+    import copy
+
+    raw = copy.deepcopy(GOOD)
+    raw["rooms"]["erin"].update(min_target=17, max_target=19)
+    with pytest.raises(ConfigError) as caught:
+        load(raw)
+    text = str(caught.value)
+    assert "default_target of 20°" in text and "away_target of 16°" in text
+
+
+def test_a_room_range_outside_the_group_range_is_rejected():
+    import copy
+
+    raw = copy.deepcopy(GOOD)
+    raw["rooms"]["erin"].update(min_target=10, max_target=21)
+    with pytest.raises(ConfigError, match="setpoint range"):
+        load(raw)

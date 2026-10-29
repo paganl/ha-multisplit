@@ -9,12 +9,23 @@ DOMAIN = "multisplit"
 CONFIG_FILE = "multisplit.yaml"
 QUESTIONNAIRE_FILE = "questionnaire.yaml"
 
-PLATFORMS: list[Platform] = [Platform.BINARY_SENSOR, Platform.CLIMATE, Platform.SENSOR]
+PLATFORMS: list[Platform] = [
+    Platform.BINARY_SENSOR,
+    Platform.CLIMATE,
+    Platform.SENSOR,
+    Platform.SWITCH,
+]
 
 SERVICE_RELOAD = "reload"
 SERVICE_EXPLAIN = "explain"
 SERVICE_SET_ROOM_TARGET = "set_room_target"
 SERVICE_CLEAR_OVERRIDE = "clear_override"
+SERVICE_SET_SCHEDULE = "set_schedule"
+
+#: Where the schedule card is served from. The integration serves it itself,
+#: so it needs no separate install and no dashboard resource.
+CARD_URL = "/multisplit_static/multisplit-schedule-card.js"
+CARD_FILE = "frontend/multisplit-schedule-card.js"
 
 ATTR_ROOM = "room"
 ATTR_UNTIL = "until"

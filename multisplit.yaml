@@ -159,7 +159,11 @@ groups:
 # not stale wins. An empty list falls back to the indoor unit's own
 # sensor, which sits in the return air path and reads warm while heating
 # -- it measures the unit, not the room, so every threshold inherits that
-# bias.
+# bias. Optional per room: `owner`, the Home Assistant user (name or id)
+# who may edit the room's schedule besides admins -- without one, only
+# admins can; and `min_target` / `max_target`, the range every target for
+# the room must sit in, schedule and thermostat alike -- without them, the
+# group's setpoint range.
 rooms:
   living_room:
     name: Living Room
@@ -169,7 +173,7 @@ rooms:
   ischa:
     name: Ischa's Bedroom
     group: a
-    climate_entity: climate.mitsubishi_ac_ischa_mitsubishi_ac_ischa_climat
+    climate_entity: climate.mitsubishi_ac_ischa_mitsubishi_ac_ischa_climate
     temperature_sensors: []
   bedroom:
     name: Bedroom
@@ -351,6 +355,14 @@ defaults:
     # this with its own `band`.
     # Units: degrees.
     band: 2.0
+    # What is the shortest setting a room's schedule may contain?
+    # Measured from one mark to the next, wrapping the week. A schedule that
+    # changes target every few minutes short-cycles a compressor shared with
+    # other rooms, so a mark that would leave a shorter setting is refused
+    # with a reason. Zero allows any length.
+    # Units: minutes.
+    # UNMEASURED — assumed; the question was left blank.
+    min_block_minutes: 30.0
     # What should a room aim for when the house is unoccupied?
     # The setback. It must sit inside the setpoint range above, or it is
     # clamped and never takes effect -- the loader checks this, because a

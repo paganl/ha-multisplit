@@ -48,6 +48,7 @@ def record_for(
     intents: dict | None = None,
     surplus: bool = False,
     surplus_reading: bool | None = None,
+    away: bool = False,
 ) -> dict:
     """One cycle, as a flat JSON-safe object.
 
@@ -64,6 +65,7 @@ def record_for(
         "outdoor": outdoor,
         "surplus": surplus,
         "surplus_reading": surplus_reading,
+        "away": away,
         "applied": applied,
         "groups": {
             decision.group: {
@@ -92,6 +94,7 @@ def record_for(
                 "intent": (
                     [i.heat_to, i.cool_to] if (i := intents.get(command.room)) else None
                 ),
+                "intent_source": (i.source if (i := intents.get(command.room)) else None),
             }
             for command in plan.rooms
         },
@@ -174,6 +177,12 @@ class Telemetry:
         # Whether to bank is a decision in its own right, and in cooling season
         # it can change without moving any recorded target. The raw reading is
         # kept too: how often it flips is what the settle time is tuned on.
+        if previous.get("away") != record.get("away"):
+            return True, "away changed"
+        for room, now in record.get("rooms", {}).items():
+            before = previous.get("rooms", {}).get(room) or {}
+            if before.get("intent_source") != now.get("intent_source"):
+                return True, f"{room} target source changed"
         if previous.get("surplus") != record.get("surplus"):
             return True, "surplus changed"
         if previous.get("surplus_reading") != record.get("surplus_reading"):

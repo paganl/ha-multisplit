@@ -55,3 +55,33 @@ clear_override:
       example: living_room
       selector:
         text:
+
+set_schedule:
+  name: Set schedule
+  description: >-
+    Replace one or more days of a room's weekly schedule. Each mark sets the
+    target from its time until the next mark. Only the room's owner or an
+    administrator may change it, and every mark must sit inside the room's
+    allowed range and leave no setting shorter than the minimum block. An
+    empty list of marks clears those days.
+  fields:
+    room:
+      name: Room
+      required: true
+      example: erin
+      selector:
+        text:
+    days:
+      name: Days
+      required: true
+      example: [mon, tue, wed, thu, fri]
+      selector:
+        select:
+          multiple: true
+          options: [mon, tue, wed, thu, fri, sat, sun]
+    marks:
+      name: Marks
+      required: true
+      example: '[{"at": "06:30", "temperature": 20}, {"at": "22:00", "temperature": 17}]'
+      selector:
+        object:

@@ -22,6 +22,12 @@ untrue — and a room that cannot have what it asked for should be able to say
 - **Refuses what the weather forbids**, with hysteresis so it cannot flap, and
   says so in words rather than just doing nothing. An outdoor sensor that
   drops out never lifts a lockout.
+- **Follows each room's own week.** The room's owner sets a schedule on a
+  dashboard card: one line per day, a mark wherever the temperature should
+  change. Guardrails keep every mark inside the room's allowed range and
+  every setting long enough not to short-cycle the compressor.
+- **Has an away mode.** One switch drops every room to its setback; a room
+  someone turns up by hand still heats.
 - **Works to a comfort band, not a point.** Heat below 20, cool above 22, do
   not fuss in between — arbitrated across the whole outdoor unit rather than
   left to each indoor unit's own dual setpoint.
@@ -113,6 +119,67 @@ multisplit: defaults.intent.band is not set; using 0, the default since 0.2.0. A
 
 Set `apply_to_hardware` to true — through Configure, or in the questionnaire
 and regenerate. Until then nothing is written to any unit.
+
+## Schedules and away
+
+Each room follows a weekly schedule set by the person whose room it is. Add
+the card to a dashboard; the integration serves it, so there is nothing to
+install and no resource to add:
+
+```yaml
+type: custom:multisplit-schedule-card
+# entities: [climate.erin_s_bedroom]   # optional; every room when left out
+```
+
+It shows one line per day, Monday to Sunday. A mark on a line sets the room's
+target from that time until the next mark, across midnight and round the week
+— a single mark on Monday at 07:00 means that temperature all week. Tap a line
+to drop a mark, drag it to move it (in 15-minute steps), tap it to change the
+temperature or remove it, and copy a day to the weekdays, the weekend or every
+day. Changes are saved with **Save schedule**; arrow keys move a focused mark
+and change its temperature, and Delete removes it.
+
+**Who may edit.** A room's `owner` (a Home Assistant user name or id, set per
+room in the questionnaire) may edit that room; administrators may edit every
+room. A room with no owner is admins-only. Others see the schedule read-only.
+
+**Guardrails.** Every mark must sit inside the room's `min_target` and
+`max_target` (by default the group's setpoint range), and no setting may last
+less than `min_block_minutes` (default 30), measured mark to mark, wrapping the
+week. The card flags a problem as you make it and will not save; the
+integration checks again, so a service call or automation cannot get round
+them either. A thermostat turned by hand is held to the same range.
+
+**What wins.** Most specific first:
+
+1. **turned by hand** — the room's thermostat; holds until the schedule next
+   changes;
+2. **away** — the house-wide switch, or the room's own `schedule_entity`
+   being off;
+3. **the room's schedule**;
+4. **the default target**, for a room with no schedule yet.
+
+**Away.** `switch.multisplit_away` sets every room to the away target. Flip
+it from the card, the dashboard or a presence automation; it survives
+restarts. Switching it either way clears manual overrides, so a tweak from the
+morning does not hold one room warm all the time the house is empty. A room
+turned up while away still heats — someone home early is not left cold.
+
+Schedules and the away state are kept in Home Assistant's storage
+(`.storage/multisplit.state`), so they survive restarts and are in its
+backups. The `multisplit.set_schedule` service does the same as the card:
+
+```yaml
+action: multisplit.set_schedule
+data:
+  room: erin
+  days: [mon, tue, wed, thu, fri]
+  marks:
+    - { at: "06:30", temperature: 19.5 }
+    - { at: "08:00", temperature: 17 }
+    - { at: "16:00", temperature: 20 }
+    - { at: "21:00", temperature: 17 }
+```
 
 ## Solar surplus
 
@@ -275,12 +342,13 @@ wall.
 
 | Entity | What it is |
 | --- | --- |
-| `climate.<room>` | the room's comfort intent: a target, and auto or off. Writes intent, never hardware |
+| `climate.<room>` | the room's comfort intent: a target, and auto or off. Writes intent, never hardware; turned by hand, it holds until the schedule next changes |
 | `sensor.<room>_status` | heating / cooling / waiting / standby / no data, with `reason`, `wants`, `unserved_for_minutes` |
 | `sensor.<group>_mode` | heat / cool / off, with `reason`, `scores`, `unserved` |
 | `binary_sensor.<group>_<mode>_allowed` | whether the weather permits it, with `reason` |
 | `sensor.<room>_overshoot` | measured minus target, with statistics kept — the raw material for refitting the cut-off |
 | `sensor.<group>_divergence` | how many units are not set the way the plan says |
+| `switch.multisplit_away` | away mode for the whole house |
 
 The room thermostat offers only **auto** and **off**, not heat and cool. A
 room cannot choose heating while the outdoor unit is cooling, so a mode picker
@@ -293,6 +361,7 @@ happening.
 | Service | What it does |
 | --- | --- |
 | `multisplit.explain` | everything the system believes right now, and why — including the solar surplus state |
+| `multisplit.set_schedule` | replace days of a room's weekly schedule (owner or admin) |
 | `multisplit.set_room_target` | override a room's target, optionally until a time |
 | `multisplit.clear_override` | back to the schedule or default |
 | `multisplit.reload` | re-read `multisplit.yaml` without restarting |
@@ -306,9 +375,13 @@ custom_components/multisplit/
     planner.py     every decision, as a pure function
     policy.py      what is permitted, and why not
     energy.py      the solar surplus, settled against passing clouds
+    schedule.py    a room's week, its guardrails, who may edit it
     config.py      validated mapping → model
   measurement.py   which sensor to believe, and whether to
-  comfort.py       override → schedule → default
+  comfort.py       override → away → schedule → default
+  store.py         schedules and away, kept across restarts
+  switch.py        the away switch
+  frontend/        the schedule card, served by the integration
   reconciler.py    the only writes to hardware
   coordinator.py   the tick: gather, plan, reconcile
   telemetry.py     one record per cycle, so the curves can be refitted
