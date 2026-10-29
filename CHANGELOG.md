@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.0 — 2026-10-29
 
 Fixes found in the first shadow-mode telemetry (27–29 October 2026).
 
