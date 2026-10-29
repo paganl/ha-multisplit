@@ -264,7 +264,7 @@ sections:
             name: Ischa's Bedroom
             group: a
             # Ends in "climat", not "climate" -- confirm in Developer Tools → States.
-            climate_entity: climate.mitsubishi_ac_ischa_mitsubishi_ac_ischa_climat
+            climate_entity: climate.mitsubishi_ac_ischa_mitsubishi_ac_ischa_climate
             temperature_sensors: []
           - key: bedroom
             name: Bedroom
