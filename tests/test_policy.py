@@ -43,11 +43,31 @@ def test_heating_lockout_mirrors_cooling():
     assert "26" in c.reasons[HEAT]
 
 
-def test_unknown_outdoor_does_not_apply_lockouts_but_says_so():
-    """Leaving the house uncontrolled because a sensor went quiet is worse."""
-    c = constraints_for(PolicyConfig(cool_below=22.0), outdoor=None)
-    assert c.allowed_modes == frozenset({HEAT, COOL})
+def test_unknown_outdoor_never_lifts_a_lockout():
+    """Field telemetry: the group chose cool at 13° outdoor while the sensor was out."""
+    locked = constraints_for(PolicyConfig(cool_below=20.0), outdoor=13.0)
+    assert COOL not in locked.allowed_modes
+    c = constraints_for(
+        PolicyConfig(cool_below=20.0), outdoor=None, previously_allowed=locked.allowed_modes
+    )
+    assert c.allowed_modes == frozenset({HEAT})
     assert "unknown" in c.reasons["outdoor"]
+    assert "unknown" in c.reasons[COOL]
+
+
+def test_unknown_outdoor_keeps_a_permission_it_already_had():
+    """Weather moves slowly; a quiet sensor is no reason to change what is allowed."""
+    c = constraints_for(
+        PolicyConfig(cool_below=20.0), outdoor=None, previously_allowed=frozenset({HEAT, COOL})
+    )
+    assert c.allowed_modes == frozenset({HEAT, COOL})
+
+
+def test_unknown_outdoor_at_start_refuses_cooling_but_still_heats():
+    """Heating in unknown weather is the recoverable mistake."""
+    c = constraints_for(PolicyConfig(cool_below=20.0), outdoor=None)
+    assert c.allowed_modes == frozenset({HEAT})
+    assert "unknown" in c.reasons[COOL]
 
 
 def test_seasonal_lock_overrides_everything():

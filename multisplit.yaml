@@ -282,6 +282,15 @@ defaults:
     # Units: weight per hour.
     # UNMEASURED — assumed; the question was left blank.
     aging_rate: 0.5
+    # How long may a running room keep its last decision once its reading goes stale?
+    # A room that is idle never starts on a stale reading. One already running
+    # keeps its mode for this long, still honouring its cut-off against the
+    # last value seen, and then fails safe and stops. Without it, a sensor
+    # going quiet mid-cycle withdraws heat from a room that may still be below
+    # target. Zero restores the old rule: stale means stop.
+    # Units: minutes.
+    # UNMEASURED — assumed; the question was left blank.
+    stale_grace_minutes: 20.0
   intent:
     #
     # === Comfort targets ===

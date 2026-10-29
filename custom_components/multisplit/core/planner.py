@@ -67,17 +67,26 @@ def _fmt_delta(delta: timedelta) -> str:
 class _Demand:
     """What one room wants, and what it is physically committed to.
 
-    ``wants`` is comfort demand: what the occupant would ask for. ``holding``
-    is hardware reality: a unit that is already running and has not yet
-    reached its cut-off is still calling on the compressor, and the group
-    cannot turn off underneath it without undoing the duty cycle. The group
-    mode is decided on ``votes``, which is either; starvation is measured on
-    ``wants`` alone, because only unmet comfort counts as being starved.
+    ``wants`` is comfort demand: what the occupant would ask for. ``acts``
+    is the part of it the room would actually act on -- for a room not
+    already running in that mode, demand that has also cleared its resume
+    band, because a room inside its resume band will not start whatever the
+    group does. ``holding`` is hardware reality: a unit that is already
+    running and has not yet reached its cut-off is still calling on the
+    compressor, and the group cannot turn off underneath it without undoing
+    the duty cycle.
+
+    The group mode is decided on ``votes``, which is ``acts`` or ``holding``
+    -- never bare ``wants``. A room that would not switch on must not choose
+    the group's mode: with both modes permitted, that would deny a room that
+    *would* run in the other one. Starvation is measured on ``acts``, because
+    a room that would not run if served is not being starved.
     """
 
     __slots__ = (
         "room",
         "wants",
+        "acts",
         "holding",
         "votes",
         "error",
@@ -92,6 +101,7 @@ class _Demand:
         self,
         room: str,
         wants: str | None,
+        acts: str | None,
         holding: str | None,
         error: float,
         heat_to: float,
@@ -102,8 +112,9 @@ class _Demand:
     ) -> None:
         self.room = room
         self.wants = wants
+        self.acts = acts
         self.holding = holding
-        self.votes = wants or holding
+        self.votes = acts or holding
         self.error = error
         self.heat_to = heat_to
         self.cool_to = cool_to
@@ -130,10 +141,27 @@ def _demand(
     cool_to = max(heat_to, constraints.clamp(intent.cool_to))
 
     if not measurement.trustworthy:
-        # A room with no trustworthy temperature does not get a vote. Guessing
-        # here would produce a confident wrong decision for the whole group.
+        # A room with no trustworthy temperature has no comfort demand: an idle
+        # room never starts a cycle on a guess. But a room already running is
+        # committed hardware, and abandoning it the moment its sensor goes
+        # quiet withdraws heat from a room that may still be below target. So
+        # for a bounded grace it keeps holding its mode -- the last safe
+        # decision -- and after that it fails safe and stops.
+        holding_stale: str | None = None
+        if _in_grace(measurement, runtime, constraints, now):
+            holding_stale = runtime.mode
+        weight = constraints.deadband * max(0.0, intent.priority) if holding_stale else 0.0
         return _Demand(
-            room.room, None, None, 0.0, heat_to, cool_to, 0.0, measurement, intent
+            room.room,
+            None,
+            None,
+            holding_stale,
+            0.0,
+            heat_to,
+            cool_to,
+            weight,
+            measurement,
+            intent,
         )
 
     temperature = measurement.temperature or 0.0
@@ -175,6 +203,16 @@ def _demand(
         wants = None
         error = 0.0
 
+    # Demand the room would act on. A room already running in the wanted mode
+    # acts on it by definition; one that is not must also be outside its
+    # resume band, the same threshold ``_participate`` uses to start it.
+    # Without this, a room 0.5° below target wanted heat (deadband 0.3) and
+    # chose the group's mode, then declined to run (resume band 0.5).
+    acts = wants
+    if wants is not None and not (runtime.running and runtime.mode == wants):
+        if error <= _resume(room, constraints):
+            acts = None
+
     # A unit already running is committed: it is calling on the compressor
     # whether or not comfort demand still exists. That holds while it is short
     # of its cut-off, and also while it is past the cut-off but inside its
@@ -196,14 +234,51 @@ def _demand(
         runtime.unserved_for(now).total_seconds() / _HOUR
     )
     magnitude = abs(error)
-    if (wants or holding) and magnitude < constraints.deadband:
+    if (acts or holding) and magnitude < constraints.deadband:
         # A committed room with no error still has to count for something, or
         # the group would switch out from under it.
         magnitude = constraints.deadband
     weight = magnitude * max(0.0, intent.priority) * aging
 
+    if not (acts or holding):
+        weight = 0.0
+
     return _Demand(
-        room.room, wants, holding, error, heat_to, cool_to, weight, measurement, intent
+        room.room,
+        wants,
+        acts,
+        holding,
+        error,
+        heat_to,
+        cool_to,
+        weight,
+        measurement,
+        intent,
+    )
+
+
+def _resume(room: RoomConfig, constraints: Constraints) -> float:
+    resume = room.participation.resume_deadband
+    return constraints.deadband if resume is None else resume
+
+
+def _in_grace(
+    measurement: RoomMeasurement,
+    runtime: RoomRuntime,
+    constraints: Constraints,
+    now: datetime,
+) -> bool:
+    """Whether a running room may keep its mode on an untrustworthy reading.
+
+    Applies with no reading at all, too. Holding is safe for a bounded time
+    because the unit was commanded a setpoint as well as a mode, and
+    regulates to it on its own sensor while ours is quiet.
+    """
+    del measurement  # the decision is the same whatever the reading was
+    return (
+        runtime.running
+        and runtime.mode is not None
+        and runtime.untrusted_for(now) < constraints.stale_grace
     )
 
 
@@ -239,30 +314,39 @@ def _decide_mode(
         inertia = constraints.inertia_weight * (0.5**half_lives)
         scores[state.mode] += inertia
 
+    # Blocked demand is judged on bare comfort, so a locked-out room still
+    # says why; arbitration and "unserved" are judged on what rooms would act on.
     wanted = {d.wants for d in demands if d.wants is not None}
     blocked = sorted(wanted - set(constraints.allowed_modes))
+    acting = {d.acts for d in demands if d.acts is not None}
 
     best = max(scores, key=lambda m: (scores[m], m == state.mode, m), default=None)
     if best is None or scores[best] <= 0.0:
         unserved = tuple(d.room for d in demands if d.wants is not None)
-        if blocked:
+        if blocked and not (acting - set(blocked)):
             reasons = "; ".join(
                 constraints.reasons.get(m, f"{m} is not permitted") for m in blocked
             )
             because = f"off — the only demand is for {'/'.join(blocked)}: {reasons}"
-        elif not wanted:
+        elif not acting:
             because = "off — every room is within its deadband"
         else:
             because = "off — no room has trustworthy demand"
         return GroupDecision(group, None, because, scores, unserved)
 
     served = [d for d in demands if d.votes == best]
-    unserved = tuple(d.room for d in demands if d.wants is not None and d.wants != best)
+    unserved = tuple(d.room for d in demands if d.acts is not None and d.acts != best)
 
     detail = ", ".join(
         f"{d.room} {_fmt(abs(d.error))}°"
         + (f" ×{d.intent.priority:g}" if d.intent.priority != 1.0 else "")
-        + ("" if d.wants else " (finishing its cycle)")
+        + (
+            ""
+            if d.acts
+            else " (holding on a stale reading)"
+            if not d.measurement.trustworthy
+            else " (finishing its cycle)"
+        )
         for d in sorted(served, key=lambda d: -d.weight)
     )
     because = f"{best} — {len(served)} room(s) asking: {detail}"
@@ -309,15 +393,44 @@ def _participate(
     """
     policy = room.participation
 
-    if not demand.measurement.trustworthy:
-        why = "sensor is stale" if demand.measurement.stale else "no temperature reading"
-        return None, f"standing by — {why}, so this room is not guessing"
-
     temperature = demand.measurement.temperature or 0.0
     cut_off = policy.cut_off(outdoor)
-    resume = policy.resume_deadband
-    if resume is None:
-        resume = constraints.deadband
+    resume = _resume(room, constraints)
+
+    if not demand.measurement.trustworthy:
+        why = "sensor is stale" if demand.measurement.stale else "no temperature reading"
+        if not (runtime.running and runtime.mode is not None):
+            return None, f"standing by — {why}, so this room is not guessing"
+        if not _in_grace(demand.measurement, runtime, constraints, now):
+            return None, (
+                f"stopped — {why} for longer than the "
+                f"{_fmt_delta(constraints.stale_grace)} grace, failing safe"
+            )
+        if mode != runtime.mode:
+            return None, (
+                "stopped — the group turned off"
+                if mode is None
+                else f"stopped — the group changed to {mode} while this room was "
+                f"{runtime.mode}ing"
+            )
+        # Holding the last decision, but still honouring the cut-off against
+        # the last value seen: a grace period is not licence to overshoot.
+        last = demand.measurement.temperature
+        if last is not None:
+            end = demand.target_for(runtime.mode)
+            point = end + cut_off if runtime.mode == HEAT else end - cut_off
+            past = last > point if runtime.mode == HEAT else last < point
+            if past and runtime.elapsed(now) >= policy.min_on:
+                return None, (
+                    f"stopped — last reading {_fmt(last)}° is past the cut-off "
+                    f"of {_fmt(point)}° ({why})"
+                )
+        left = constraints.stale_grace - runtime.untrusted_for(now)
+        seen = f" (last reading {_fmt(last)}°)" if last is not None else ""
+        return runtime.mode, (
+            f"{runtime.mode}ing — {why}; keeping the last decision for up to "
+            f"another {_fmt_delta(left)}{seen}"
+        )
 
     def cut_off_state(for_mode: str) -> tuple[bool, float]:
         """Judged against the end of the band that mode is working towards."""
@@ -368,6 +481,12 @@ def _participate(
                 demand.wants, f"{demand.wants} is not permitted"
             )
             return None, f"standing by — wants {demand.wants}, but {reason}"
+        if demand.wants is not None and demand.acts is None:
+            # Leaning towards a mode, but not far enough to start a cycle --
+            # which is why it did not turn the group on.
+            return None, (
+                f"standing by — {_fmt(temperature)}° is within {_fmt(resume)}° of target"
+            )
         if demand.wants is not None:
             return None, f"standing by — wants {demand.wants}, the group is off"
         return None, f"standing by — satisfied at {_fmt(temperature)}° {_band(demand)}"
@@ -483,10 +602,11 @@ def plan(
             # a room whose mode is locked out cannot win at any weight, so
             # ageing it only produces an unbounded clock that means nothing.
             starved = (
-                demand.wants is not None
-                and demand.wants in limits.allowed_modes
-                and decision.mode != demand.wants
+                demand.acts is not None
+                and demand.acts in limits.allowed_modes
+                and decision.mode != demand.acts
             )
+            trusted = demand.measurement.trustworthy
             next_runtime.append(
                 replace(
                     was,
@@ -500,6 +620,7 @@ def plan(
                     # to sit out a full rest before it could ever heat.
                     since=now if changed else was.since,
                     unserved_since=(was.unserved_since or now) if starved else None,
+                    untrusted_since=None if trusted else (was.untrusted_since or now),
                 )
             )
 

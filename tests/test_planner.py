@@ -654,3 +654,151 @@ def test_the_cut_off_is_measured_from_the_end_being_worked_towards():
     )
     assert past.room("office").standing_by
     assert "past the cut-off of 20.3" in past.room("office").because
+
+
+# --------------------------------------------------------------------------
+# Field telemetry, October 2026: stale sensors and deadband votes
+# --------------------------------------------------------------------------
+
+
+def _heating(name, minutes=30, untrusted_for=None):
+    return RoomRuntime(
+        name,
+        running=True,
+        mode=HEAT,
+        since=NOW - timedelta(minutes=minutes),
+        untrusted_since=None if untrusted_for is None else NOW - untrusted_for,
+    )
+
+
+def test_a_room_inside_its_resume_band_does_not_choose_the_group_mode():
+    """19.5° against 20°: wants heat (deadband 0.3) but will not start (resume 0.5).
+
+    Field: Group A switched to heat on Ischa alone 188 times, while Ischa never ran.
+    """
+    result = run(
+        configs("ischa", resume=0.5), {"ischa": 19.5}, {"ischa": 20.0}, outdoor=13.0
+    )
+    assert result.group("a").mode is None
+    assert result.group("a").scores.get(HEAT, 0.0) == 0.0
+    ischa = result.room("ischa")
+    assert ischa.standing_by and "within 0.5°" in ischa.because
+
+
+def test_a_deadband_room_cannot_deny_a_room_that_would_run_the_other_mode():
+    """The conflict that matters once cooling is permitted."""
+    result = run(
+        configs("bedroom", "erin", resume=0.5),
+        {"bedroom": 19.5, "erin": 21.0},
+        {"bedroom": 20.0, "erin": 20.0},
+        outdoor=21.5,
+    )
+    assert result.group("a").mode == COOL
+    assert result.room("erin").mode == COOL
+    assert "bedroom" not in result.group("a").unserved
+
+
+def test_a_deadband_room_does_not_accrue_starvation():
+    result = run(
+        configs("ischa", resume=0.5), {"ischa": 19.5}, {"ischa": 20.0}, outdoor=13.0
+    )
+    assert result.runtime[0].unserved_since is None
+
+
+def test_a_running_room_keeps_its_vote_inside_the_resume_band():
+    """Actionable demand is about starting; a room already heating still acts."""
+    result = run(
+        configs("ischa", resume=0.5),
+        {"ischa": 19.6},
+        {"ischa": 20.0},
+        outdoor=7.0,
+        group_mode=HEAT,
+        group_since=NOW - timedelta(minutes=30),
+        runtime={"ischa": _heating("ischa")},
+    )
+    assert result.group("a").mode == HEAT
+    assert result.room("ischa").mode == HEAT
+
+
+def test_a_sensor_going_stale_mid_cycle_does_not_abandon_a_cold_room():
+    """Field: Erin heating at 18° was dropped when its reading went stale."""
+    result = run(
+        configs("erin"),
+        {"erin": 18.0},
+        {"erin": 20.0},
+        outdoor=7.0,
+        group_mode=HEAT,
+        group_since=NOW - timedelta(minutes=30),
+        runtime={"erin": _heating("erin")},
+        stale={"erin"},
+    )
+    assert result.group("a").mode == HEAT
+    erin = result.room("erin")
+    assert erin.mode == HEAT
+    assert "keeping the last decision" in erin.because
+    assert "stale reading" in result.group("a").because
+    assert result.runtime[0].untrusted_since == NOW, "the grace clock starts now"
+
+
+def test_after_the_grace_a_stale_room_fails_safe():
+    result = run(
+        configs("erin"),
+        {"erin": 18.0},
+        {"erin": 20.0},
+        outdoor=7.0,
+        group_mode=HEAT,
+        group_since=NOW - timedelta(minutes=60),
+        runtime={"erin": _heating("erin", minutes=60, untrusted_for=timedelta(minutes=21))},
+        stale={"erin"},
+    )
+    assert result.room("erin").standing_by
+    assert "failing safe" in result.room("erin").because
+    assert result.group("a").mode is None
+
+
+def test_a_stale_idle_room_still_never_starts():
+    result = run(configs("erin"), {"erin": 18.0}, {"erin": 20.0}, outdoor=7.0, stale={"erin"})
+    assert result.group("a").mode is None
+    assert "not guessing" in result.room("erin").because
+
+
+def test_a_held_room_still_stops_at_its_cut_off_on_the_last_reading():
+    result = run(
+        configs("erin"),
+        {"erin": 21.0},
+        {"erin": 20.0},
+        outdoor=0.0,  # cut-off +0.3 in these placeholder curves
+        group_mode=HEAT,
+        group_since=NOW - timedelta(minutes=30),
+        runtime={"erin": _heating("erin")},
+        stale={"erin"},
+    )
+    assert result.room("erin").standing_by
+    assert "past the cut-off" in result.room("erin").because
+
+
+def test_a_fresh_reading_clears_the_grace_clock():
+    result = run(
+        configs("erin"),
+        {"erin": 19.0},
+        {"erin": 20.0},
+        outdoor=7.0,
+        group_mode=HEAT,
+        group_since=NOW - timedelta(minutes=30),
+        runtime={"erin": _heating("erin", untrusted_for=timedelta(minutes=10))},
+    )
+    assert result.runtime[0].untrusted_since is None
+
+
+def test_a_running_room_with_no_reading_at_all_is_also_held_for_the_grace():
+    result = run(
+        configs("erin"),
+        {"erin": None},
+        {"erin": 20.0},
+        outdoor=7.0,
+        group_mode=HEAT,
+        group_since=NOW - timedelta(minutes=30),
+        runtime={"erin": _heating("erin")},
+    )
+    assert result.room("erin").mode == HEAT
+    assert "no temperature reading" in result.room("erin").because

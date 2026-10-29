@@ -309,6 +309,12 @@ def _policy(reader: _Reader, raw: Mapping, where: str) -> PolicyConfig:
         inertia_weight=reader.number(raw, "inertia_weight", where),
         inertia_half_life=reader.minutes(raw, "inertia_half_life_minutes", where),
         aging_rate=reader.number(raw, "aging_rate", where),
+        # Optional, so an existing multisplit.yaml keeps loading.
+        stale_grace=(
+            reader.minutes(raw, "stale_grace_minutes", where)
+            if "stale_grace_minutes" in raw
+            else PolicyConfig.stale_grace
+        ),
     )
 
 

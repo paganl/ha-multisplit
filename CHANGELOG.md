@@ -1,5 +1,45 @@
 # Changelog
 
+## Unreleased
+
+Fixes found in the first shadow-mode telemetry (27–29 October 2026).
+
+**Fixed**
+
+- **Group mode is arbitrated on demand a room would act on.** A room 0.5°
+  below target wanted heat (deadband 0.3) and chose its group's mode, then
+  declined to run because it was inside its resume band (0.5). Group A
+  switched to heat on Ischa alone 188 times without Ischa ever running, and
+  once cooling is permitted the same vote would deny a room that *would* run
+  in the other mode. A room not already running in a mode now votes for it
+  only once it has cleared its resume band; it also stops accruing
+  starvation while it waits inside it. Replaying the telemetry, Group A's
+  mode changes fall from 116 to 4.
+- **A sensor going quiet mid-cycle no longer abandons a running room.** A
+  room that is idle still never starts on an untrustworthy reading. One
+  already running now keeps its last decision for `stale_grace_minutes`
+  (default 20) — still stopping at its cut-off on the last value seen — and
+  then fails safe. Previously Erin was dropped while heating at 18° against
+  20°.
+- **Freshness is time since the sensor last reported, not since its value
+  changed.** Every stale flag in the telemetry came on exactly 30 minutes
+  after the value last changed, with a reading present 88–100% of the time:
+  a 0.5°-resolution return-air sensor in a steady room was stale for being
+  steady (the office for 68% of the log). `last_reported` is now used where
+  Home Assistant provides it.
+- **An unknown outdoor temperature no longer lifts the cooling lockout.**
+  The group chose cool at 13° outdoor on the two cycles the sensor dropped
+  out. Unknown now keeps the previous cycle's lockouts; at start-up, with no
+  previous answer, cooling is refused and heating permitted.
+
+**Added**
+
+- `tools/replay.py` replays telemetry through the planner, optionally with a
+  forced outdoor temperature (`--outdoor`) or a different freshness rule
+  (`--freshness availability`). It reproduces all 3,238 recorded decisions
+  exactly, which is what makes it a fair way to test the heat-against-cool
+  conflict before the weather allows it.
+
 ## 0.2.0 — 2026-10-28
 
 **Added**

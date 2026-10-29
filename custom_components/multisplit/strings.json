@@ -57,7 +57,8 @@
           "away_target": "What should a room aim for when the house is unoccupied? (°C)",
           "inertia_weight": "How strongly should the group resist changing mode?",
           "inertia_half_life_minutes": "How quickly should that resistance fade? (minutes)",
-          "aging_rate": "How fast should an unserved room gain priority? (weight per hour)"
+          "aging_rate": "How fast should an unserved room gain priority? (weight per hour)",
+          "stale_grace_minutes": "How long may a running room keep its last decision once its reading goes stale? (minutes)"
         },
         "data_description": {
           "outdoor_sensor": "Every lockout and every participation curve is indexed against this entity, so the curves are only valid while it stays the same one. A weather service is usually better than the outdoor unit's own sensor, which sits in a sun-trap often enough to read several degrees off.",
@@ -90,7 +91,8 @@
           "away_target": "The setback. It must sit inside the setpoint range above, or it is clamped and never takes effect -- the loader checks this, because a clamped setback looks exactly like a broken schedule.",
           "inertia_weight": "A score bonus for staying put. Too low and it churns; too high and it is slow to respond to a genuine need. Unlike a hard minimum runtime it only biases the decision -- the system is never forbidden from responding. Currently an assumption, not a measurement.",
           "inertia_half_life_minutes": "The bonus halves every interval, so sustained demand eventually wins. Currently an assumption, not a measurement.",
-          "aging_rate": "Extra weight per hour a room's demand goes unmet. This is what makes starvation impossible by construction and replaces the request and approve protocol: a genuinely starved room wins eventually, with nobody pressing a button. Currently an assumption, not a measurement."
+          "aging_rate": "Extra weight per hour a room's demand goes unmet. This is what makes starvation impossible by construction and replaces the request and approve protocol: a genuinely starved room wins eventually, with nobody pressing a button. Currently an assumption, not a measurement.",
+          "stale_grace_minutes": "A room that is idle never starts on a stale reading. One already running keeps its mode for this long, still honouring its cut-off against the last value seen, and then fails safe and stops. Without it, a sensor going quiet mid-cycle withdraws heat from a room that may still be below target. Zero restores the old rule: stale means stop. Currently an assumption, not a measurement."
         }
       }
     },

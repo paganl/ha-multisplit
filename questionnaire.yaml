@@ -477,3 +477,18 @@ sections:
         target: defaults.policy.aging_rate
         answer: null
         assume: 0.5
+
+      - id: stale_grace_minutes
+        ask: How long may a running room keep its last decision once its reading goes stale?
+        why: >-
+          A room that is idle never starts on a stale reading. One already
+          running keeps its mode for this long, still honouring its cut-off
+          against the last value seen, and then fails safe and stops. Without
+          it, a sensor going quiet mid-cycle withdraws heat from a room that
+          may still be below target. Zero restores the old rule: stale means
+          stop.
+        type: number
+        unit: minutes
+        target: defaults.policy.stale_grace_minutes
+        answer: null
+        assume: 20

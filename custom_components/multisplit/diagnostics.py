@@ -47,6 +47,9 @@ async def async_get_config_entry_diagnostics(
                         group.policy.inertia_half_life.total_seconds() / 60
                     ),
                     "aging_rate": group.policy.aging_rate,
+                    "stale_grace_minutes": (
+                        group.policy.stale_grace.total_seconds() / 60
+                    ),
                 }
                 for group in config.groups
             },

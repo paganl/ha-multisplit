@@ -198,6 +198,7 @@ class RoomRuntime:
     mode: str | None = None  # the mode it is running in, None when standing by
     since: datetime | None = None  # last participation transition
     unserved_since: datetime | None = None  # when demand first went unserved
+    untrusted_since: datetime | None = None  # when its reading stopped being trustworthy
 
     def elapsed(self, now: datetime) -> timedelta:
         if self.since is None:
@@ -208,6 +209,12 @@ class RoomRuntime:
         if self.unserved_since is None:
             return timedelta(0)
         return now - self.unserved_since
+
+    def untrusted_for(self, now: datetime) -> timedelta:
+        """How long the reading has been untrustworthy; zero on the first cycle."""
+        if self.untrusted_since is None:
+            return timedelta(0)
+        return now - self.untrusted_since
 
 
 @dataclass(frozen=True)
@@ -256,6 +263,14 @@ class Constraints:
     inertia_weight: float = 2.0
     inertia_half_life: timedelta = timedelta(minutes=20)
     aging_rate: float = 0.5  # extra weight per hour a room goes unserved
+    stale_grace: timedelta = timedelta(minutes=20)
+    """How long a room *already running* keeps its last decision once its
+    reading stops being trustworthy, before it fails safe and stops.
+
+    A room that is idle never starts on an untrustworthy reading; this only
+    stops a sensor that goes quiet mid-cycle from abandoning a room that is
+    still below target. Zero restores the old behaviour: stale means stop.
+    """
     reasons: dict[str, str] = field(default_factory=dict)
 
     def clamp(self, target: float) -> float:

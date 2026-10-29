@@ -14,6 +14,8 @@ from .model import COOL, HEAT, MODES, Constraints, ParticipationPolicy
 
 SEASON_AUTO = "auto"
 
+_NOUN = {HEAT: "heating", COOL: "cooling"}
+
 
 @dataclass(frozen=True)
 class PolicyConfig:
@@ -38,6 +40,7 @@ class PolicyConfig:
     inertia_weight: float = 2.0
     inertia_half_life: timedelta = timedelta(minutes=20)
     aging_rate: float = 0.5
+    stale_grace: timedelta = timedelta(minutes=20)
 
     extra_reasons: dict[str, str] = field(default_factory=dict)
 
@@ -55,10 +58,16 @@ def constraints_for(
     threshold would allow and forbid cooling on alternate cycles, and the
     group would change its mind as fast as the sensor noise.
 
-    An unknown outdoor temperature does **not** apply the lockouts. The
-    alternative -- forbidding both modes -- protects the hardware but leaves
-    the house uncontrolled because a sensor went quiet, which is the worse
-    failure. The reason is recorded so the UI can say so out loud.
+    An unknown outdoor temperature keeps last cycle's answer. Weather moves
+    slowly, so a quiet sensor is no reason to change what is permitted --
+    and above all no reason to *lift* a lockout. Lifting it was the old
+    behaviour, and it failed open: field telemetry recorded a group choosing
+    cool at 13° outdoor for the cycles the sensor dropped out.
+
+    With no previous answer (the first cycle after a start), cooling is
+    refused and heating permitted. Heating in unknown weather is the
+    recoverable mistake; cooling a house that is already cold is not what a
+    lockout exists to allow. The reason is recorded so the UI can say so.
     """
     previous = previously_allowed if previously_allowed is not None else frozenset(MODES)
     allowed = set(MODES)
@@ -72,9 +81,27 @@ def constraints_for(
         reasons[HEAT] = "seasonal lock: cooling season"
 
     if outdoor is None:
-        reasons.setdefault(
-            "outdoor", "outdoor temperature unknown — temperature lockouts not applied"
-        )
+        if previously_allowed is not None:
+            for mode in set(allowed) - set(previously_allowed):
+                allowed.discard(mode)
+                reasons.setdefault(
+                    mode,
+                    f"{_NOUN[mode]} locked out: outdoor temperature unknown, "
+                    "keeping the last lockout decision",
+                )
+            reasons.setdefault(
+                "outdoor", "outdoor temperature unknown — keeping the last lockout decision"
+            )
+        else:
+            if config.cool_below is not None and COOL in allowed:
+                allowed.discard(COOL)
+                reasons[COOL] = (
+                    "cooling locked out: outdoor temperature unknown, "
+                    "and there is no earlier reading to go on"
+                )
+            reasons.setdefault(
+                "outdoor", "outdoor temperature unknown — cooling refused until it is known"
+            )
         return _build(config, allowed, reasons)
 
     hysteresis = max(0.0, config.lockout_hysteresis)
@@ -136,6 +163,7 @@ def _build(
         inertia_weight=config.inertia_weight,
         inertia_half_life=config.inertia_half_life,
         aging_rate=config.aging_rate,
+        stale_grace=config.stale_grace,
         reasons=merged,
     )
 

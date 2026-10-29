@@ -45,6 +45,21 @@ def read_outdoor(hass: HomeAssistant, config: SystemConfig) -> float | None:
     return _as_float(state.state)
 
 
+def _age(state, now: datetime):
+    """Time since the integration last *reported*, not since the value changed.
+
+    ``last_updated`` only moves when the state or an attribute changes, so a
+    0.5°-resolution sensor in a room holding steady looks stale purely for
+    being steady. Field telemetry showed exactly that: every stale flag came
+    on 30 minutes after the value last changed and cleared when it moved,
+    with a reading present 88-100% of the time. ``last_reported`` (Home
+    Assistant 2024.3+) also moves when an unchanged state is written again.
+    Unavailable and unknown states are rejected before this is consulted.
+    """
+    reported = getattr(state, "last_reported", None) or state.last_updated
+    return now - max(reported, state.last_updated)
+
+
 def collect(
     hass: HomeAssistant, config: SystemConfig, now: datetime | None = None
 ) -> dict[str, RoomMeasurement]:
@@ -64,7 +79,7 @@ def collect(
             value = _as_float(state.state)
             if value is None:
                 continue
-            stale = (now - state.last_updated) > stale_after
+            stale = _age(state, now) > stale_after
             candidate = RoomMeasurement(room.key, value, stale=stale, source=entity_id)
             if not stale:
                 measurement = candidate
@@ -81,7 +96,7 @@ def collect(
             if state is not None:
                 value = _as_float(state.attributes.get("current_temperature"))
                 if value is not None:
-                    stale = (now - state.last_updated) > stale_after
+                    stale = _age(state, now) > stale_after
                     measurement = RoomMeasurement(
                         room.key,
                         value,

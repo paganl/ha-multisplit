@@ -54,6 +54,7 @@ def test_the_assumed_values_are_the_ones_we_think_they_are():
         "inertia_weight",
         "inertia_half_life_minutes",
         "aging_rate",
+        "stale_grace_minutes",
     }
 
 
