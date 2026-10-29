@@ -129,7 +129,8 @@ Not every tick. Five rooms at a 30 second tick is about 1.8 kB a record and
 need a season — and almost all of those records are identical.
 
 So a line is written when something changes: a group or room mode, what a room
-wants, a target, the divergence from the hardware, or **a room's temperature
+wants, a target, the divergence from the hardware, the solar surplus (settled
+or raw), or **a room's temperature
 moving more than 0.2 °C** — that last one is what gives a room's coast after
 being switched off its resolution, and it is the measurement `fit_curves.py`
 needs most. Plus a heartbeat every 15 minutes, so a quiet file means a quiet
@@ -143,8 +144,11 @@ but not the twenty-fold more that recording every tick would cost.
 Recording every tick is still available (`on_change: false`) if you want the
 raw stream for a few days.
 
-Each record holds outdoor temperature, and for each room its target, measured
-temperature, what it wanted, what it was told to do and why. Then:
+Each record holds outdoor temperature, the solar surplus (`surplus`, as the
+planner used it, and `surplus_reading`, the sensor before settling), and for
+each room its target, its comfort band as asked for before any banking
+(`intent`), measured temperature, what it wanted, what it was told to do and
+why. Then:
 
 ```bash
 python3 tools/fit_curves.py multisplit-telemetry.jsonl
@@ -167,6 +171,25 @@ against outdoor temperature over a season.
 Each cycle is also fired as a `multisplit_cycle` event, and the diagnostics
 download from the device page carries the configuration as loaded, the recent
 cycles with their reasons and scores, and the observed overshoot points.
+
+### Banking solar surplus
+
+With `energy.surplus_sensor` set to a binary sensor that is on while the house
+exports, a room on surplus works `solar_boost` degrees into its comfort band —
+heating aims above the bottom, cooling below the top, never past the other end
+— so the building stores energy while it is the house's own. It applies only
+while one mode is permitted, does nothing with a band of zero, and follows the
+sensor only once it has held for `settle_minutes`. Reasons say so:
+`heating — 20.5° against a target of 21° (banking solar: 1° into the band)`.
+
+To see which decisions banking would change in recorded telemetry:
+
+```bash
+python3 tools/replay.py multisplit-telemetry.jsonl --surplus on
+```
+
+That shows what the planner would have *asked for*; whether it saved anything
+has to come from running it, in shadow mode first.
 
 ### Divergence
 

@@ -23,6 +23,27 @@
 # weather service is usually better than the outdoor unit's own sensor,
 # which sits in a sun-trap often enough to read several degrees off.
 outdoor_sensor: sensor.openweathermap_temperature
+energy:
+  #
+  # === Solar surplus ===
+  #
+  # Which binary sensor is on while the house is exporting to the grid?
+  # Exporting means generating more than the house uses, which is when heat
+  # is cheapest to make: once net metering ends, exported power is worth far
+  # less than imported power. While it is on, rooms work towards the far end
+  # of their comfort band and the building stores the heat for later. Leave
+  # empty (null) for no sensor, which never banks. Only on/off is read;
+  # unavailable counts as off.
+  surplus_sensor: binary_sensor.exporting_to_grid
+  # How long must the surplus sensor hold a state before the plan follows it?
+  # A passing cloud would otherwise move every room's target and back within
+  # minutes. It applies both ways, which also damps the loop the banking
+  # itself creates: heating on surplus uses the surplus, export can stop,
+  # and without a settle the plan would stop banking the moment it started.
+  # Zero follows the sensor immediately.
+  # Units: minutes.
+  # UNMEASURED — assumed; the question was left blank.
+  settle_minutes: 10.0
 operation:
   #
   # === Operation ===
@@ -291,6 +312,17 @@ defaults:
     # Units: minutes.
     # UNMEASURED — assumed; the question was left blank.
     stale_grace_minutes: 20.0
+    # On surplus, how far into its comfort band should a room aim?
+    # Heating aims this much above the bottom of the band (cooling this much
+    # below the top), never past the other end. It only applies while one mode
+    # is permitted -- with both open, narrowing the band invites heat against
+    # cool -- and it does nothing with a band of zero, since there is nothing
+    # to bank into. Zero turns banking off. A group may override it in its own
+    # policy, which matters for an outdoor unit whose minimum output a small
+    # surplus cannot cover.
+    # Units: degrees.
+    # UNMEASURED — assumed; the question was left blank.
+    solar_boost: 1.0
   intent:
     #
     # === Comfort targets ===

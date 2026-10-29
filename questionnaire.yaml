@@ -33,6 +33,37 @@ sections:
         target: outdoor_sensor
         answer: sensor.openweathermap_temperature
 
+  - title: Solar surplus
+    questions:
+      - id: surplus_sensor
+        ask: Which binary sensor is on while the house is exporting to the grid?
+        why: >-
+          Exporting means generating more than the house uses, which is when
+          heat is cheapest to make: once net metering ends, exported power is
+          worth far less than imported power. While it is on, rooms work
+          towards the far end of their comfort band and the building stores
+          the heat for later. Leave empty (null) for no sensor, which never
+          banks. Only on/off is read; unavailable counts as off.
+        type: entity
+        domain: binary_sensor
+        optional: true
+        target: energy.surplus_sensor
+        answer: binary_sensor.exporting_to_grid
+
+      - id: surplus_settle_minutes
+        ask: How long must the surplus sensor hold a state before the plan follows it?
+        why: >-
+          A passing cloud would otherwise move every room's target and back
+          within minutes. It applies both ways, which also damps the loop the
+          banking itself creates: heating on surplus uses the surplus, export
+          can stop, and without a settle the plan would stop banking the moment
+          it started. Zero follows the sensor immediately.
+        type: number
+        unit: minutes
+        target: energy.settle_minutes
+        answer: null
+        assume: 10
+
   - title: Operation
     questions:
       - id: apply_to_hardware
@@ -501,3 +532,19 @@ sections:
         target: defaults.policy.stale_grace_minutes
         answer: null
         assume: 20
+
+      - id: solar_boost
+        ask: On surplus, how far into its comfort band should a room aim?
+        why: >-
+          Heating aims this much above the bottom of the band (cooling this
+          much below the top), never past the other end. It only applies while
+          one mode is permitted -- with both open, narrowing the band invites
+          heat against cool -- and it does nothing with a band of zero, since
+          there is nothing to bank into. Zero turns banking off. A group may
+          override it in its own policy, which matters for an outdoor unit
+          whose minimum output a small surplus cannot cover.
+        type: number
+        unit: degrees
+        target: defaults.policy.solar_boost
+        answer: null
+        assume: 1.0

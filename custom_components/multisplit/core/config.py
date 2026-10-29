@@ -34,9 +34,12 @@ from .policy import PolicyConfig, participation_problems
 #: A file written before that version lacks them; the default here is what
 #: such a file meant, since the behaviour before the key existed is exactly
 #: the default's. Nothing else may fall back to a value defined in Python.
-ADDED_SINCE: dict[str, tuple[str, float]] = {
+ADDED_SINCE: dict[str, tuple[str, float | None]] = {
     "band": ("0.2.0", 0.0),  # defaults.intent: zero is a single setpoint
     "stale_grace_minutes": ("0.3.0", 20.0),  # any policy block
+    "surplus_sensor": ("0.4.0", None),  # energy: no sensor, never banks
+    "settle_minutes": ("0.4.0", 10.0),  # energy
+    "solar_boost": ("0.4.0", 0.0),  # any policy block: zero never banks
 }
 
 
@@ -117,6 +120,20 @@ class OperationConfig:
 
 
 @dataclass(frozen=True)
+class EnergyConfig:
+    """Where the house's power is coming from.
+
+    ``surplus_sensor`` is on while the house is exporting -- generating more
+    than it uses -- which is when heat is cheapest to make. ``settle`` is how
+    long it must hold a state before the plan follows it, so a passing cloud
+    does not flip every room's target. None means no sensor: never banks.
+    """
+
+    surplus_sensor: str | None
+    settle: timedelta
+
+
+@dataclass(frozen=True)
 class IntentConfig:
     """Targets used when nothing more specific applies.
 
@@ -149,6 +166,7 @@ class SystemConfig:
     intent: IntentConfig
     groups: tuple[GroupSpec, ...]
     rooms: tuple[RoomSpec, ...]
+    energy: EnergyConfig = EnergyConfig(None, timedelta(minutes=10))
     #: Keys from ADDED_SINCE that the file lacked and were defaulted, each
     #: phrased as what to add. Empty for a file that says everything.
     notices: tuple[str, ...] = ()
@@ -231,10 +249,25 @@ class _Reader:
         """
         if key in raw:
             return self.number(raw, key, where, **checks)
+        return self._defaulted(key, where)
+
+    def added_entity(self, raw: Mapping, key: str, where: str, domain: str) -> str | None:
+        """An entity id that may be absent because it postdates the file.
+
+        Present and null means "deliberately none", which is not a notice.
+        """
+        if key not in raw:
+            return self._defaulted(key, where)
+        if raw[key] is None:
+            return None
+        return self.entity_id(raw, key, where, domain)
+
+    def _defaulted(self, key: str, where: str):
         version, default = ADDED_SINCE[key]
+        shown = "null" if default is None else f"{default:g}"
         self.notices.append(
-            f"{where}.{key} is not set; using {default:g}, the default since "
-            f"{version}. Add '{key}: {default:g}' to make it explicit."
+            f"{where}.{key} is not set; using {shown}, the default since "
+            f"{version}. Add '{key}: {shown}' to make it explicit."
         )
         return default
 
@@ -347,6 +380,7 @@ def _policy(reader: _Reader, raw: Mapping, where: str) -> PolicyConfig:
         stale_grace=timedelta(
             minutes=reader.added_number(raw, "stale_grace_minutes", where, minimum=0)
         ),
+        solar_boost=reader.added_number(raw, "solar_boost", where, minimum=0),
     )
 
 
@@ -365,6 +399,18 @@ def load(raw: object) -> SystemConfig:
     root = reader.mapping(raw, "multisplit.yaml")
 
     outdoor = reader.entity_id(root, "outdoor_sensor", "multisplit.yaml", "sensor")
+
+    # The whole section is newer than some files, so its absence is the same
+    # as each key being absent: defaulted, with a notice apiece.
+    raw_energy = reader.mapping(root.get("energy", {}), "energy")
+    energy = EnergyConfig(
+        surplus_sensor=reader.added_entity(
+            raw_energy, "surplus_sensor", "energy", "binary_sensor"
+        ),
+        settle=timedelta(
+            minutes=reader.added_number(raw_energy, "settle_minutes", "energy", minimum=0)
+        ),
+    )
 
     defaults = reader.mapping(root.get("defaults"), "defaults")
     default_policy = _policy(reader, reader.mapping(defaults.get("policy"), "defaults.policy"), "defaults.policy")
@@ -550,5 +596,6 @@ def load(raw: object) -> SystemConfig:
         intent=intent,
         groups=tuple(groups),
         rooms=tuple(rooms),
+        energy=energy,
         notices=tuple(reader.notices),
     )

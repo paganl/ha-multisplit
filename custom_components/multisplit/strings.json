@@ -28,6 +28,8 @@
         "description": "Leave a field as it is to keep the current answer. Curves and lists are edited as YAML.",
         "data": {
           "outdoor_sensor": "Which entity reports the outdoor temperature?",
+          "surplus_sensor": "Which binary sensor is on while the house is exporting to the grid?",
+          "surplus_settle_minutes": "How long must the surplus sensor hold a state before the plan follows it? (minutes)",
           "apply_to_hardware": "Should the integration command the units, or only publish what it would do?",
           "tick_seconds": "How often should the system re-evaluate everything? (seconds)",
           "write_interval_seconds": "At minimum, how long between two commands to the same unit? (seconds)",
@@ -58,10 +60,13 @@
           "inertia_weight": "How strongly should the group resist changing mode?",
           "inertia_half_life_minutes": "How quickly should that resistance fade? (minutes)",
           "aging_rate": "How fast should an unserved room gain priority? (weight per hour)",
-          "stale_grace_minutes": "How long may a running room keep its last decision once its reading goes stale? (minutes)"
+          "stale_grace_minutes": "How long may a running room keep its last decision once its reading goes stale? (minutes)",
+          "solar_boost": "On surplus, how far into its comfort band should a room aim? (degrees)"
         },
         "data_description": {
           "outdoor_sensor": "Every lockout and every participation curve is indexed against this entity, so the curves are only valid while it stays the same one. A weather service is usually better than the outdoor unit's own sensor, which sits in a sun-trap often enough to read several degrees off.",
+          "surplus_sensor": "Exporting means generating more than the house uses, which is when heat is cheapest to make: once net metering ends, exported power is worth far less than imported power. While it is on, rooms work towards the far end of their comfort band and the building stores the heat for later. Leave empty (null) for no sensor, which never banks. Only on/off is read; unavailable counts as off.",
+          "surplus_settle_minutes": "A passing cloud would otherwise move every room's target and back within minutes. It applies both ways, which also damps the loop the banking itself creates: heating on surplus uses the surplus, export can stop, and without a settle the plan would stop banking the moment it started. Zero follows the sensor immediately. Currently an assumption, not a measurement.",
           "apply_to_hardware": "false is shadow mode: the plan is computed every tick and published to the status sensors, but nothing is written to any unit. The existing blueprints keep running the house, and every divergence between what they did and what the planner would have done is either a bug here or a behaviour of the old system nobody wrote down. Leave this false until those divergences have been looked at; it is the cheapest safety net in the project and the only one that costs nothing to keep.",
           "tick_seconds": "The reconciler is idempotent and rate-limited per unit, so a fast tick costs little and makes the system quicker to correct a unit that was changed at the wall. The per-unit rate limit, not this, is what protects the compressor. Currently an assumption, not a measurement.",
           "write_interval_seconds": "The per-unit rate limit. It keeps the reconciler clear of the compressor's own anti-cycle lockout even if something upstream changes its mind rapidly. Currently an assumption, not a measurement.",
@@ -92,7 +97,8 @@
           "inertia_weight": "A score bonus for staying put. Too low and it churns; too high and it is slow to respond to a genuine need. Unlike a hard minimum runtime it only biases the decision -- the system is never forbidden from responding. Currently an assumption, not a measurement.",
           "inertia_half_life_minutes": "The bonus halves every interval, so sustained demand eventually wins. Currently an assumption, not a measurement.",
           "aging_rate": "Extra weight per hour a room's demand goes unmet. This is what makes starvation impossible by construction and replaces the request and approve protocol: a genuinely starved room wins eventually, with nobody pressing a button. Currently an assumption, not a measurement.",
-          "stale_grace_minutes": "A room that is idle never starts on a stale reading. One already running keeps its mode for this long, still honouring its cut-off against the last value seen, and then fails safe and stops. Without it, a sensor going quiet mid-cycle withdraws heat from a room that may still be below target. Zero restores the old rule: stale means stop. Currently an assumption, not a measurement."
+          "stale_grace_minutes": "A room that is idle never starts on a stale reading. One already running keeps its mode for this long, still honouring its cut-off against the last value seen, and then fails safe and stops. Without it, a sensor going quiet mid-cycle withdraws heat from a room that may still be below target. Zero restores the old rule: stale means stop. Currently an assumption, not a measurement.",
+          "solar_boost": "Heating aims this much above the bottom of the band (cooling this much below the top), never past the other end. It only applies while one mode is permitted -- with both open, narrowing the band invites heat against cool -- and it does nothing with a band of zero, since there is nothing to bank into. Zero turns banking off. A group may override it in its own policy, which matters for an outdoor unit whose minimum output a small surplus cannot cover. Currently an assumption, not a measurement."
         }
       }
     },

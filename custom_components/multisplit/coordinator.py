@@ -24,6 +24,7 @@ from .const import DOMAIN
 from .core.config import SystemConfig
 from .core.model import Constraints, GroupState, Plan, RoomRuntime
 from .core.planner import plan as make_plan
+from .core.energy import SurplusLatch
 from .core.policy import constraints_for
 from .comfort import Override
 from .reconciler import Reconciler
@@ -62,6 +63,7 @@ class MultisplitCoordinator(DataUpdateCoordinator[Plan]):
         }
         self._allowed_previously: dict[str, frozenset[str]] = {}
         self._constraints: dict[str, Constraints] = {}
+        self.surplus = SurplusLatch(config.energy.settle)
 
         # Telemetry is written off the control loop. Home Assistant's executor
         # pool is shared, and one badly behaved integration can occupy every
@@ -85,6 +87,8 @@ class MultisplitCoordinator(DataUpdateCoordinator[Plan]):
         later.
         """
         watched = {self.config.outdoor_sensor}
+        if self.config.energy.surplus_sensor:
+            watched.add(self.config.energy.surplus_sensor)
         for room in self.config.rooms:
             watched.add(room.climate_entity)
             watched.update(room.temperature_sensors)
@@ -124,6 +128,8 @@ class MultisplitCoordinator(DataUpdateCoordinator[Plan]):
             self.overrides.pop(room, None)
 
         outdoor = measurement.read_outdoor(self.hass, self.config)
+        surplus_reading = measurement.read_surplus(self.hass, self.config)
+        surplus = self.surplus.update(surplus_reading, now)
         measurements = measurement.collect(self.hass, self.config, now)
         intents = comfort.resolve(self.hass, self.config, self.overrides, now)
 
@@ -132,6 +138,7 @@ class MultisplitCoordinator(DataUpdateCoordinator[Plan]):
                 group.policy,
                 outdoor=outdoor,
                 previously_allowed=self._allowed_previously.get(group.key),
+                solar=surplus,
             )
             for group in self.config.groups
         }
@@ -174,10 +181,14 @@ class MultisplitCoordinator(DataUpdateCoordinator[Plan]):
             if self.pending:
                 _LOGGER.debug("multisplit: shadow mode, would write: %s", "; ".join(self.pending))
 
-        await self._async_record(plan, measurements, outdoor)
+        await self._async_record(
+            plan, measurements, outdoor, intents, surplus, surplus_reading
+        )
         return plan
 
-    async def _async_record(self, plan, measurements, outdoor) -> None:
+    async def _async_record(
+        self, plan, measurements, outdoor, intents, surplus, surplus_reading
+    ) -> None:
         """Keep the cycle. Never let recording it break the cycle itself."""
         record = record_for(
             plan,
@@ -186,6 +197,9 @@ class MultisplitCoordinator(DataUpdateCoordinator[Plan]):
             self.pending,
             self.actions,
             self.config.operation.apply_to_hardware,
+            intents=intents,
+            surplus=surplus,
+            surplus_reading=surplus_reading,
         )
         self.telemetry.remember(record)
 
@@ -300,6 +314,11 @@ class MultisplitCoordinator(DataUpdateCoordinator[Plan]):
         return {
             "at": plan.at.isoformat(),
             "apply_to_hardware": self.config.operation.apply_to_hardware,
+            "energy": (
+                self.surplus.describe(plan.at)
+                if self.config.energy.surplus_sensor
+                else "no surplus sensor configured"
+            ),
             "groups": groups if room is None else {},
             "rooms": {**rooms, **excluded},
             "pending_writes": list(self.pending),

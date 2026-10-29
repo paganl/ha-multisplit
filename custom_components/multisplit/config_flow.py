@@ -146,7 +146,13 @@ class MultisplitOptionsFlow(OptionsFlow):
             if current is None:
                 current = question.get("assume")
             kind = question.get("type", "number")
-            key = vol.Optional(question["id"], default=_as_default(current, kind))
+            # No default for an empty answer: an entity picker cannot hold
+            # None, and an absent default leaves the field blank instead.
+            key = (
+                vol.Optional(question["id"])
+                if current is None
+                else vol.Optional(question["id"], default=_as_default(current, kind))
+            )
 
             if kind == "boolean":
                 fields[key] = selector.BooleanSelector()

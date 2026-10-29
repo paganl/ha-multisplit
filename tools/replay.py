@@ -4,6 +4,7 @@
     python3 tools/replay.py multisplit-telemetry.jsonl
     python3 tools/replay.py telemetry.jsonl --outdoor 21.5
     python3 tools/replay.py telemetry.jsonl --outdoor 21.5 --freshness availability
+    python3 tools/replay.py telemetry.jsonl --surplus on
 
 Each telemetry record carries what the planner saw: the outdoor temperature
 and, per room, its target, measured temperature and staleness. Fed back
@@ -17,6 +18,11 @@ recorded temperatures were not caused by the controller's decisions, so
 replaying different decisions against them is fair. A forced outdoor
 temperature does not change how the rooms would have behaved in that weather;
 it changes only what the controller is permitted to do.
+
+``--surplus on|off`` forces the solar surplus signal for every record, to
+see which decisions banking would change. Like ``--outdoor`` it is open
+loop: it shows what the controller would have *asked for*, not how warm the
+rooms would then have become -- that has to come from running it.
 
 ``--freshness`` decides what "stale" means during replay:
 
@@ -46,7 +52,7 @@ from core.planner import plan as make_plan  # noqa: E402
 from core.policy import constraints_for  # noqa: E402
 
 
-def replay(records, config, *, outdoor=None, freshness="recorded"):
+def replay(records, config, *, outdoor=None, freshness="recorded", surplus=None):
     """Yield (record, plan, constraints) for every record, threading state."""
     runtime: dict = {}
     group_state = {g.key: GroupState(g.key) for g in config.groups}
@@ -57,6 +63,7 @@ def replay(records, config, *, outdoor=None, freshness="recorded"):
     for record in records:
         now = datetime.fromisoformat(record["at"])
         out = record["outdoor"] if outdoor is None else outdoor
+        solar = record.get("surplus", False) if surplus is None else surplus
 
         measurements, intents = {}, {}
         for key, room in record["rooms"].items():
@@ -67,12 +74,20 @@ def replay(records, config, *, outdoor=None, freshness="recorded"):
             measurements[key] = RoomMeasurement(
                 key, value, stale=stale, source=room.get("source", "replay")
             )
-            band = max(0.0, (room.get("cool_to") or room["target"]) - room["target"])
-            intents[key] = RoomIntent(key, room["target"], band=band)
+            if room.get("intent"):
+                # Recorded since 0.4.0: the band as asked for, before banking.
+                heat_to, cool_to = room["intent"]
+                intents[key] = RoomIntent(key, heat_to, band=max(0.0, cool_to - heat_to))
+            else:
+                band = max(0.0, (room.get("cool_to") or room["target"]) - room["target"])
+                intents[key] = RoomIntent(key, room["target"], band=band)
 
         limits = {
             g.key: constraints_for(
-                g.policy, outdoor=out, previously_allowed=allowed_previously.get(g.key)
+                g.policy,
+                outdoor=out,
+                previously_allowed=allowed_previously.get(g.key),
+                solar=solar,
             )
             for g in config.groups
         }
@@ -98,10 +113,15 @@ def replay(records, config, *, outdoor=None, freshness="recorded"):
 
 
 def _summary(records, config, args) -> None:
-    rows = list(replay(records, config, outdoor=args.outdoor, freshness=args.freshness))
+    surplus = {"on": True, "off": False}.get(args.surplus)
+    rows = list(
+        replay(
+            records, config, outdoor=args.outdoor, freshness=args.freshness, surplus=surplus
+        )
+    )
     groups = [g.key for g in config.groups]
 
-    if args.outdoor is None and args.freshness == "recorded":
+    if args.outdoor is None and args.freshness == "recorded" and surplus is None:
         same = sum(
             all(r["groups"][g]["mode"] == p.group(g).mode for g in groups)
             for r, p, _ in rows
@@ -152,6 +172,9 @@ def main() -> int:
     parser.add_argument("--outdoor", type=float, help="force this outdoor temperature")
     parser.add_argument(
         "--freshness", choices=("recorded", "availability"), default="recorded"
+    )
+    parser.add_argument(
+        "--surplus", choices=("on", "off"), help="force the solar surplus signal"
     )
     parser.add_argument("--show", type=int, default=5, help="conflicts to print")
     args = parser.parse_args()

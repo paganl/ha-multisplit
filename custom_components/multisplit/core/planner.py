@@ -95,6 +95,7 @@ class _Demand:
         "weight",
         "measurement",
         "intent",
+        "banked",
     )
 
     def __init__(
@@ -109,6 +110,7 @@ class _Demand:
         weight: float,
         measurement: RoomMeasurement,
         intent: RoomIntent,
+        banked: float = 0.0,
     ) -> None:
         self.room = room
         self.wants = wants
@@ -121,6 +123,7 @@ class _Demand:
         self.weight = weight
         self.measurement = measurement
         self.intent = intent
+        self.banked = banked
 
     def target_for(self, mode: str | None) -> float:
         """Heating aims at the bottom of the band, cooling at the top."""
@@ -139,6 +142,18 @@ def _demand(
 ) -> _Demand:
     heat_to = constraints.clamp(intent.heat_to)
     cool_to = max(heat_to, constraints.clamp(intent.cool_to))
+
+    # On solar, work towards the far end of the band: heat banked now is heat
+    # not bought later. Only ever within the band, and policy offers it only
+    # when one mode is permitted, so the other end cannot start asking.
+    banked = 0.0
+    if constraints.solar_bank > 0:
+        if constraints.allowed_modes == frozenset({HEAT}):
+            raised = min(cool_to, heat_to + constraints.solar_bank)
+            banked, heat_to = raised - heat_to, raised
+        elif constraints.allowed_modes == frozenset({COOL}):
+            lowered = max(heat_to, cool_to - constraints.solar_bank)
+            banked, cool_to = cool_to - lowered, lowered
 
     if not measurement.trustworthy:
         # A room with no trustworthy temperature has no comfort demand: an idle
@@ -162,6 +177,7 @@ def _demand(
             weight,
             measurement,
             intent,
+            banked,
         )
 
     temperature = measurement.temperature or 0.0
@@ -254,6 +270,7 @@ def _demand(
         weight,
         measurement,
         intent,
+        banked,
     )
 
 
@@ -585,7 +602,11 @@ def plan(
                     room=room.room,
                     mode=mode,
                     target=demand.target_for(mode or demand.wants),
-                    because=because,
+                    because=(
+                        f"{because} (banking solar: {_fmt(demand.banked)}° into the band)"
+                        if demand.banked
+                        else because
+                    ),
                     wants=demand.wants,
                     unserved_for=was.unserved_for(now),
                     heat_to=demand.heat_to,

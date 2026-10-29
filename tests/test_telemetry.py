@@ -351,3 +351,27 @@ def test_a_failing_batch_does_not_lose_the_rest(tmp_path):
         [cycle(at=NOW + timedelta(minutes=2), outdoor=7.0, measured=22.0, target=21.0, mode=HEAT)]
     )
     assert telemetry.last_error is None, "it recovers once the path is writable again"
+
+
+def test_a_change_in_surplus_is_always_written(tmp_path):
+    """Banking is a decision in its own right; the raw sensor is what the
+    settle time is tuned against, so its flips are kept as well."""
+    telemetry = Telemetry(CONFIG.telemetry, tmp_path)
+
+    def tick(minute, surplus, reading):
+        record = cycle(at=NOW + timedelta(minutes=minute), outdoor=7.0, measured=21.0, target=21.0, mode=HEAT)
+        record.update(surplus=surplus, surplus_reading=reading)
+        telemetry.write(record)
+
+    tick(0, False, False)
+    tick(1, False, True)  # the sensor flips: written
+    tick(2, False, True)  # nothing new: skipped
+    tick(11, True, True)  # the latch follows: written
+    assert telemetry.written == 3
+
+    lines = [json.loads(line) for line in telemetry.path.read_text(encoding="utf-8").splitlines()]
+    assert [(r["surplus"], r["surplus_reading"]) for r in lines] == [
+        (False, False),
+        (False, True),
+        (True, True),
+    ]

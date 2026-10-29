@@ -293,6 +293,11 @@ def test_only_keys_added_since_a_release_may_default():
     from core.config import ADDED_SINCE
     from core.policy import PolicyConfig
 
-    assert set(ADDED_SINCE) == {"band", "stale_grace_minutes"}
+    assert set(ADDED_SINCE) == {
+        "band", "stale_grace_minutes", "surplus_sensor", "settle_minutes", "solar_boost",
+    }
     assert ADDED_SINCE["band"][1] == 0.0
     assert timedelta(minutes=ADDED_SINCE["stale_grace_minutes"][1]) == PolicyConfig.stale_grace
+    # Every 0.4.0 default must mean "behave as before": never bank.
+    assert ADDED_SINCE["surplus_sensor"][1] is None
+    assert ADDED_SINCE["solar_boost"][1] == PolicyConfig.solar_boost == 0.0

@@ -55,6 +55,8 @@ def test_the_assumed_values_are_the_ones_we_think_they_are():
         "inertia_half_life_minutes",
         "aging_rate",
         "stale_grace_minutes",
+        "surplus_settle_minutes",
+        "solar_boost",
     }
 
 

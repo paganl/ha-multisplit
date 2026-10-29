@@ -72,6 +72,8 @@ def validate(question: dict, value: Any) -> Any:
 
     if kind == "entity":
         domain = question["domain"]
+        if value is None and question.get("optional"):
+            return None
         if not isinstance(value, str) or not value.startswith(f"{domain}."):
             raise AnswerError(f"{where}: expected a {domain}.* entity id, got {value!r}")
         return value

@@ -41,6 +41,8 @@ class PolicyConfig:
     inertia_half_life: timedelta = timedelta(minutes=20)
     aging_rate: float = 0.5
     stale_grace: timedelta = timedelta(minutes=20)
+    #: Degrees to move into the comfort band while on solar. 0 = never.
+    solar_boost: float = 0.0
 
     extra_reasons: dict[str, str] = field(default_factory=dict)
 
@@ -50,6 +52,7 @@ def constraints_for(
     *,
     outdoor: float | None,
     previously_allowed: frozenset[str] | None = None,
+    solar: bool = False,
 ) -> Constraints:
     """Build ``Constraints`` for one group.
 
@@ -68,6 +71,10 @@ def constraints_for(
     refused and heating permitted. Heating in unknown weather is the
     recoverable mistake; cooling a house that is already cold is not what a
     lockout exists to allow. The reason is recorded so the UI can say so.
+
+    ``solar`` says the house is running on its own generation. It never
+    changes what is permitted; it only lets the group bank heat (or cool)
+    inside the comfort band -- see ``Constraints.solar_bank``.
     """
     previous = previously_allowed if previously_allowed is not None else frozenset(MODES)
     allowed = set(MODES)
@@ -102,7 +109,7 @@ def constraints_for(
             reasons.setdefault(
                 "outdoor", "outdoor temperature unknown — cooling refused until it is known"
             )
-        return _build(config, allowed, reasons)
+        return _build(config, allowed, reasons, solar)
 
     hysteresis = max(0.0, config.lockout_hysteresis)
 
@@ -148,12 +155,28 @@ def constraints_for(
                     f"minus {hysteresis:g}° of hysteresis"
                 )
 
-    return _build(config, allowed, reasons)
+    return _build(config, allowed, reasons, solar)
 
 
 def _build(
-    config: PolicyConfig, allowed: set[str], reasons: dict[str, str]
+    config: PolicyConfig, allowed: set[str], reasons: dict[str, str], solar: bool
 ) -> Constraints:
+    bank = 0.0
+    boost = max(0.0, config.solar_boost)
+    if solar and boost > 0:
+        if len(allowed) == 1:
+            bank = boost
+            (only,) = allowed
+            direction = "higher" if only == HEAT else "lower"
+            reasons["solar"] = (
+                f"on solar: {_NOUN[only]} aims {boost:g}° {direction} within "
+                "each comfort band, banking it while it is the house's own"
+            )
+        else:
+            reasons["solar"] = (
+                "on solar, but not banking: with both modes permitted, moving "
+                "into the band would invite heat against cool"
+            )
     merged = {**reasons, **config.extra_reasons}
     return Constraints(
         allowed_modes=frozenset(allowed),
@@ -164,6 +187,7 @@ def _build(
         inertia_half_life=config.inertia_half_life,
         aging_rate=config.aging_rate,
         stale_grace=config.stale_grace,
+        solar_bank=bank,
         reasons=merged,
     )
 

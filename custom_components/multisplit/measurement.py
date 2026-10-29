@@ -45,6 +45,22 @@ def read_outdoor(hass: HomeAssistant, config: SystemConfig) -> float | None:
     return _as_float(state.state)
 
 
+def read_surplus(hass: HomeAssistant, config: SystemConfig) -> bool | None:
+    """Whether the house is exporting, or None when there is no answer.
+
+    None -- no sensor configured, or it is unavailable -- is treated as no
+    surplus downstream: banking is an optimisation, and the safe default is
+    the behaviour from before it existed.
+    """
+    entity = config.energy.surplus_sensor
+    if entity is None:
+        return None
+    state = hass.states.get(entity)
+    if state is None or state.state in _UNUSABLE:
+        return None
+    return state.state == "on"
+
+
 def _age(state, now: datetime):
     """Time since the integration last *reported*, not since the value changed.
 

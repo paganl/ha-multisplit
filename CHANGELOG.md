@@ -1,5 +1,36 @@
 # Changelog
 
+## 0.4.0 — 2026-10-29
+
+**Added**
+
+- **Banking solar surplus.** While the house is exporting, a room works
+  `solar_boost` degrees into its comfort band — heating towards the top,
+  cooling towards the bottom, never past the other end — so the building
+  stores energy while it is the house's own rather than selling it back.
+  Worth more from 1 January 2027, when net metering ends.
+
+  It is offered only while one mode is permitted, because narrowing the band
+  with both open would invite heat against cool; it does nothing with a band
+  of zero. The sensor must hold a state for `settle_minutes` (default 10)
+  before the plan follows it, in both directions: banking uses the surplus,
+  so export can stop *because* banking started, and an unsettled latch would
+  oscillate at the sensor's own pace. Unavailable counts as no surplus, and a
+  restart never begins by banking.
+
+  Configured in a new *Solar surplus* section of the questionnaire
+  (`energy.surplus_sensor`, `energy.settle_minutes`) and per group
+  (`policy.solar_boost`, default 1° in the shipped config). Files from before
+  0.4.0 load with all three defaulted to never banking, with a notice each.
+  Reasons, the group's `policy_reasons` and the `explain` service all say
+  when it applies, and when it is on solar but declining to.
+
+- **Telemetry for it.** Each record carries `surplus` (as the planner used
+  it), `surplus_reading` (the sensor before settling) and each room's
+  `intent` (its band before banking). A change in either surplus value is
+  always written. `tools/replay.py --surplus on|off` replays with the signal
+  forced, and banked cycles replay exactly.
+
 ## 0.3.1 — 2026-10-29
 
 **Fixed**

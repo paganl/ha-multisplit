@@ -44,11 +44,26 @@ def record_for(
     pending: tuple[str, ...],
     actions: tuple[str, ...],
     applied: bool,
+    *,
+    intents: dict | None = None,
+    surplus: bool = False,
+    surplus_reading: bool | None = None,
 ) -> dict:
-    """One cycle, as a flat JSON-safe object."""
+    """One cycle, as a flat JSON-safe object.
+
+    ``surplus`` and each room's ``intent`` -- the band as asked for, before
+    any banking moved it -- are what let the replay reproduce a banked cycle
+    exactly. The commanded ``target`` alone cannot: it is already moved.
+    ``surplus_reading`` is the sensor as read, before settling (None for
+    unavailable or no sensor), so the settle time can be judged against how
+    the real signal behaves.
+    """
+    intents = intents or {}
     return {
         "at": plan.at.isoformat(),
         "outdoor": outdoor,
+        "surplus": surplus,
+        "surplus_reading": surplus_reading,
         "applied": applied,
         "groups": {
             decision.group: {
@@ -74,6 +89,9 @@ def record_for(
                 ),
                 "unserved_minutes": round(command.unserved_for.total_seconds() / 60, 2),
                 "because": command.because,
+                "intent": (
+                    [i.heat_to, i.cool_to] if (i := intents.get(command.room)) else None
+                ),
             }
             for command in plan.rooms
         },
@@ -152,6 +170,14 @@ class Telemetry:
                 # This is the one that matters for the curves: a room drifting
                 # after it was switched off.
                 return True, f"{room} moved {abs(is_now - was):.2f}°"
+
+        # Whether to bank is a decision in its own right, and in cooling season
+        # it can change without moving any recorded target. The raw reading is
+        # kept too: how often it flips is what the settle time is tuned on.
+        if previous.get("surplus") != record.get("surplus"):
+            return True, "surplus changed"
+        if previous.get("surplus_reading") != record.get("surplus_reading"):
+            return True, "surplus sensor changed"
 
         if previous.get("pending") != record.get("pending"):
             return True, "the divergence from the hardware changed"

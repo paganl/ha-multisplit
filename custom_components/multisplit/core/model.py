@@ -271,6 +271,18 @@ class Constraints:
     stops a sensor that goes quiet mid-cycle from abandoning a room that is
     still below target. Zero restores the old behaviour: stale means stop.
     """
+    solar_bank: float = 0.0
+    """How far to move each room's working end into its comfort band, because
+    the house is running on its own solar.
+
+    Heat is cheapest to make when it is the house's own surplus, and the
+    building stores it: a room heated to the top of its band on solar needs
+    less from the grid in the evening. So on solar, heating aims this much
+    higher (and cooling this much lower), never past the other end of the
+    band. Policy sets it only when exactly one mode is permitted: with both
+    open, narrowing the band would invite the heat-against-cool fight the
+    band exists to prevent. Zero is the normal case.
+    """
     reasons: dict[str, str] = field(default_factory=dict)
 
     def clamp(self, target: float) -> float:
