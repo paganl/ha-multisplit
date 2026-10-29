@@ -599,7 +599,10 @@ def load(raw: object) -> SystemConfig:
                 f"the room's range {min_target:g}–{max_target:g}° goes outside the "
                 f"group's setpoint range {low:g}–{high:g}°",
             )
-        else:
+        elif "min_target" in body or "max_target" in body:
+            # Only for a range the room sets itself. A room on its group's
+            # range was never held to it for these, and a file that loaded
+            # before must keep loading.
             for label, value in (
                 ("default_target", intent.default_target),
                 ("away_target", intent.away_target),

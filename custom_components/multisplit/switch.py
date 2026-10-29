@@ -45,10 +45,18 @@ class AwaySwitch(CoordinatorEntity[MultisplitCoordinator], SwitchEntity):
 
     @property
     def extra_state_attributes(self) -> dict:
-        return {"away_target": self.coordinator.config.intent.away_target}
+        # `multisplit_away` lets the schedule card find this switch without
+        # mistaking another integration's for it.
+        return {
+            "away_target": self.coordinator.config.intent.away_target,
+            "multisplit_away": True,
+        }
 
     async def async_turn_on(self, **kwargs) -> None:
         await self.coordinator.async_set_away(True)
+        # The plan refresh is debounced; the switch itself should not wait.
+        self.async_write_ha_state()
 
     async def async_turn_off(self, **kwargs) -> None:
         await self.coordinator.async_set_away(False)
+        self.async_write_ha_state()

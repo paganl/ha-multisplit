@@ -27,6 +27,7 @@ from homeassistant.exceptions import ConfigEntryNotReady, HomeAssistantError
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.event import async_call_later
+from homeassistant.util import dt as dt_util
 
 from . import measurement
 from .const import (
@@ -61,7 +62,7 @@ _STARTUP_GRACE = 60.0
 SET_ROOM_TARGET_SCHEMA = vol.Schema(
     {
         vol.Required(ATTR_ROOM): cv.string,
-        vol.Required("temperature"): vol.Coerce(float),
+        vol.Required("temperature"): vol.All(vol.Coerce(float), vol.Range(min=0, max=40)),
         vol.Optional(ATTR_UNTIL): cv.datetime,
     }
 )
@@ -69,11 +70,20 @@ ROOM_SCHEMA = vol.Schema({vol.Required(ATTR_ROOM): cv.string})
 
 
 def _time(value):
+    """'07:30', or minutes past midnight -- which is what an unquoted 07:30
+    becomes in Home Assistant's YAML (1.1 reads it as base-60: 450)."""
+    if isinstance(value, int) and not isinstance(value, bool) and 0 <= value < 1440:
+        return f"{value // 60:02d}:{value % 60:02d}"
     try:
         parse_time(value)
     except ValueError as error:
         raise vol.Invalid(str(error)) from error
     return value
+
+
+#: A temperature that is a number at all. NaN passes every range check by
+#: failing every comparison, so it is refused here, before it can be stored.
+_TEMPERATURE = vol.All(vol.Coerce(float), vol.Range(min=0, max=40))
 
 
 SET_SCHEDULE_SCHEMA = vol.Schema(
@@ -86,7 +96,7 @@ SET_SCHEDULE_SCHEMA = vol.Schema(
                 vol.Schema(
                     {
                         vol.Required("at"): _time,
-                        vol.Required("temperature"): vol.Coerce(float),
+                        vol.Required("temperature"): _TEMPERATURE,
                     }
                 )
             ],
@@ -289,6 +299,11 @@ def _async_check_entities_later(
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    coordinator = hass.data.get(DOMAIN, {}).get(entry.entry_id)
+    if coordinator is not None:
+        # A schedule saved in the last couple of seconds is still waiting in
+        # the delayed save; a reload would otherwise read the file without it.
+        await coordinator.store.async_flush()
     unloaded = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unloaded:
         hass.data[DOMAIN].pop(entry.entry_id, None)
@@ -340,6 +355,7 @@ def _async_register_services(hass: HomeAssistant) -> None:
             report = coordinator.explain()
             merged["at"] = report.get("at")
             merged["apply_to_hardware"] = report.get("apply_to_hardware")
+            merged["away"] = report.get("away")
             merged["groups"].update(report.get("groups", {}))
             merged["rooms"].update(report.get("rooms", {}))
             merged["pending_writes"].extend(report.get("pending_writes", []))
@@ -348,8 +364,13 @@ def _async_register_services(hass: HomeAssistant) -> None:
 
     async def set_room_target(call: ServiceCall) -> None:
         room = call.data[ATTR_ROOM]
+        until = call.data.get(ATTR_UNTIL)
+        # The UI's datetime picker sends wall-clock time with no zone. Compared
+        # with an aware "now" that raises on every cycle, so read it as local.
+        if until is not None and until.tzinfo is None:
+            until = until.replace(tzinfo=dt_util.get_default_time_zone())
         await _resolve(hass, room).async_set_override(
-            room, call.data["temperature"], call.data.get(ATTR_UNTIL)
+            room, call.data["temperature"], until
         )
 
     async def set_schedule(call: ServiceCall) -> None:

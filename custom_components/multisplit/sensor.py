@@ -151,7 +151,11 @@ class RoomStatusSensor(MultisplitRoomEntity, SensorEntity):
             "measured_from": measurement.source if measurement else None,
             "stale": measurement.stale if measurement else None,
             "unserved_for_minutes": round(command.unserved_for.total_seconds() / 60, 1),
-            "intent_source": "override" if override else "schedule or default",
+            "intent_source": (
+                intent.source
+                if (intent := self.coordinator.intents.get(self._room))
+                else None
+            ),
             "override_until": override.expires_at.isoformat()
             if override and override.expires_at
             else None,

@@ -71,9 +71,9 @@ class RoomClimate(MultisplitRoomEntity, ClimateEntity):
         # than climate.<room>_<room>.
         self._attr_name = None
         spec = self._spec
-        low, high = coordinator.config.group(spec.group).policy.setpoint_range
-        self._attr_min_temp = low
-        self._attr_max_temp = high
+        # The room's own range, so the dial cannot offer what would be refused.
+        self._attr_min_temp = spec.min_target
+        self._attr_max_temp = spec.max_target
 
     # -- what it reads -------------------------------------------------
 

@@ -45,6 +45,10 @@ class StateStore:
                 "away": bool(data.get("away", False)),
             }
 
+    async def async_flush(self) -> None:
+        """Write now, rather than after the save delay."""
+        await self._store.async_save(self._raw)
+
     def _save(self) -> None:
         self._store.async_delay_save(lambda: self._raw, _SAVE_DELAY)
 

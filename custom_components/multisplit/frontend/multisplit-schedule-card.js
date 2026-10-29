@@ -32,6 +32,8 @@ const toMinute = (t) => {
 };
 const fmt = (v) => (Math.round(v * 10) / 10).toString();
 const clamp = (v, lo, hi) => Math.min(Math.max(v, lo), hi);
+const esc = (v) =>
+  String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 
 /* Cool slate for setbacks through to amber and ember for comfort. Positioned
  * on the room's own range, so a narrow range still reads as a gradient. */
@@ -89,6 +91,22 @@ function carriedInto(week, d) {
   return null;
 }
 
+/* Wall-clock parts of `date` in Home Assistant's time zone, which is what
+ * schedules are written in -- not the browser's, which can differ. */
+function houseClock(hass, date = new Date()) {
+  const zone = (hass && hass.config && hass.config.time_zone) || undefined;
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat("en-GB", {
+      timeZone: zone, weekday: "short", hour: "2-digit", minute: "2-digit", hourCycle: "h23",
+    }).formatToParts(date).map((p) => [p.type, p.value])
+  );
+  return {
+    day: DAY_SHORT.indexOf(parts.weekday),
+    minute: Number(parts.hour) * 60 + Number(parts.minute),
+    time: `${parts.hour}:${parts.minute}`,
+  };
+}
+
 class MultisplitScheduleCard extends HTMLElement {
   setConfig(config) {
     this._config = config || {};
@@ -120,6 +138,16 @@ class MultisplitScheduleCard extends HTMLElement {
     const rooms = this._rooms();
     if (!rooms.length) return this._renderEmpty();
     if (!this._room || !rooms.includes(this._room)) this._selectRoom(rooms[0]);
+    // Home Assistant sets hass on every state change anywhere in the house.
+    // Only this room, the away switch and the room list matter here, and a
+    // redraw while someone is typing a time would throw their input away.
+    const awayId = this._awaySwitch();
+    const watched = [hass.states[this._room], awayId && hass.states[awayId], rooms.join()];
+    const same = this._watched && watched.every((v, i) => v === this._watched[i]);
+    if (same && this.shadowRoot.querySelector("ha-card")) return;
+    const active = this.shadowRoot.activeElement;
+    if (active && active.closest && active.closest(".editor")) return; // redraw on the next change
+    this._watched = watched;
     const attrs = this._attrs();
     const incoming = JSON.stringify(attrs.schedule || {});
     // Follow changes made elsewhere -- unless this person is mid-edit, when
@@ -148,7 +176,7 @@ class MultisplitScheduleCard extends HTMLElement {
 
   _awaySwitch() {
     return Object.keys(this._hass.states).find(
-      (id) => id.startsWith("switch.") && this._hass.states[id].attributes.away_target !== undefined
+      (id) => id.startsWith("switch.") && this._hass.states[id].attributes.multisplit_away === true
     );
   }
 
@@ -161,6 +189,7 @@ class MultisplitScheduleCard extends HTMLElement {
   }
 
   _load() {
+    this._selected = null;
     const raw = this._attrs().schedule || {};
     this._saved = JSON.stringify(raw);
     this._week = DAYS.map((d) =>
@@ -402,12 +431,9 @@ class MultisplitScheduleCard extends HTMLElement {
           <span class="tag">${fmt(m.temperature)}°</span></button>`;
       })
       .join("");
-    const now = new Date();
-    const today = (now.getDay() + 6) % 7;
+    const now = houseClock(this._hass);
     const nowLine =
-      today === day
-        ? `<div class="now" style="left:${((now.getHours() * 60 + now.getMinutes()) / DAY) * 100}%"></div>`
-        : "";
+      now.day === day ? `<div class="now" style="left:${(now.minute / DAY) * 100}%"></div>` : "";
     return `${segs}${nowLine}${flags}`;
   }
 
@@ -418,8 +444,7 @@ class MultisplitScheduleCard extends HTMLElement {
 
   _status(a) {
     const target = a.heat_to !== undefined ? `${fmt(a.heat_to)}°` : "";
-    const until = (iso) =>
-      iso ? new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false }) : null;
+    const until = (iso) => (iso ? houseClock(this._hass, new Date(iso)).time : null);
     switch (a.target_source) {
       case "override": {
         const t = until(a.override_until);
@@ -457,8 +482,8 @@ class MultisplitScheduleCard extends HTMLElement {
             .map((id) => {
               const s = this._hass.states[id];
               const label = (s && s.attributes.friendly_name) || id;
-              return `<button role="tab" class="room${id === this._room ? " on" : ""}" data-room="${id}"
-                aria-selected="${id === this._room}">${label}</button>`;
+              return `<button role="tab" class="room${id === this._room ? " on" : ""}" data-room="${esc(id)}"
+                aria-selected="${id === this._room}">${esc(label)}</button>`;
             })
             .join("")}</div>`
         : "";
@@ -496,20 +521,20 @@ class MultisplitScheduleCard extends HTMLElement {
       ? empty
         ? `No schedule yet, so this room follows the default ${fmt(this._limits().fallback)}°. Tap a day to drop the first mark.`
         : "Tap a day to add a mark. Drag a mark to move it, or tap it to change it."
-      : `Only ${a.owner ? `${a.owner} or ` : ""}an administrator can change this schedule.`;
+      : `Only ${a.owner ? `${esc(a.owner)} or ` : ""}an administrator can change this schedule.`;
 
     const messages = [
       ...found.map((p) => `<li>${p}</li>`),
-      this._error ? `<li>${this._error}</li>` : "",
+      this._error ? `<li>${esc(this._error)}</li>` : "",
     ].join("");
 
     this.shadowRoot.innerHTML = `${STYLE}<ha-card>
       ${tabs}
       <div class="head">
         <div>
-          <h2>${name}</h2>
+          <h2>${esc(name)}</h2>
           <p class="status">${state ? this._status(a) : "Unavailable"}</p>
-          <p class="rails">Allowed ${fmt(lo)}–${fmt(hi)}°. Each setting at least ${block} min.${a.owner ? ` Owner: ${a.owner}.` : ""}</p>
+          <p class="rails">Allowed ${fmt(lo)}–${fmt(hi)}°. Each setting at least ${block} min.${a.owner ? ` Owner: ${esc(a.owner)}.` : ""}</p>
         </div>
         ${
           awayId

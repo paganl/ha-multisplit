@@ -355,3 +355,16 @@ def test_a_room_range_outside_the_group_range_is_rejected():
     raw["rooms"]["erin"].update(min_target=10, max_target=21)
     with pytest.raises(ConfigError, match="setpoint range"):
         load(raw)
+
+
+def test_a_group_with_its_own_narrower_range_still_loads():
+    """Review finding: rooms on their group's range were newly held to the
+    shared away target, so a file that loaded before stopped loading."""
+    import copy
+
+    raw = copy.deepcopy(GOOD)
+    policy = copy.deepcopy(raw["defaults"]["policy"])
+    policy["setpoint_range"] = [18.0, 26.0]
+    raw["groups"]["b"]["policy"] = policy
+    config = load(raw)  # away_target 16 sits below group b's 18, as it could before
+    assert config.guardrails("erin").min_target == 18.0

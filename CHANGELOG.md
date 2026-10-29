@@ -35,6 +35,28 @@ the planner gave every room the same 20°.
   `multisplit.set_room_target` is unchanged.
 - Requires Home Assistant 2024.7 or later, for serving the card.
 
+**Fixed during the beta** (from an independent review, before any report from
+a real install):
+
+- An override with an `until` time from the UI's date picker (no time zone)
+  made every cycle fail; it is now read as local time. This predates 0.5.0.
+- The card redrew on every state change in the house, throwing away a time
+  being typed and keyboard focus; it now redraws only when its room or the
+  away switch changes, and never mid-edit.
+- The away switch could show its old state for up to ten seconds after
+  being flipped.
+- A room's thermostat dial offered temperatures outside the room's range,
+  which were then refused; it now stops at the range.
+- A group with its own narrower setpoint range would have been rejected on
+  upgrade; the shared targets are only checked against a range a room sets
+  itself.
+- `set_schedule` accepts unquoted times in automations (`at: 22:00`, which
+  Home Assistant's YAML reads as minutes) and refuses a temperature that is
+  not a real number. A schedule saved just before a reload is no longer lost.
+- The room status sensor's `intent_source`, and `explain`, now report away.
+- The card uses Home Assistant's time zone for "now" and "next change", not
+  the browser's, and finds the away switch by a marker of its own.
+
 **Fixed**
 
 - The shipped `multisplit.yaml` had Ischa's entity as `…_ischa_climat`; it is
