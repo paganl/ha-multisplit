@@ -95,6 +95,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         # Not ConfigEntryNotReady: retrying will not fix a typo.
         raise HomeAssistantError(f"{CONFIG_FILE} is not valid:\n{error}") from error
 
+    # Keys this file predates, filled with their documented defaults. A
+    # warning rather than an error: the file means what it always meant, but
+    # it should say so.
+    for notice in config.notices:
+        _LOGGER.warning("multisplit: %s", notice)
+
     _async_register_devices(hass, entry, config)
 
     coordinator = MultisplitCoordinator(hass, entry, config)

@@ -251,3 +251,48 @@ def test_a_zero_priority_is_rejected_rather_than_silently_becoming_one():
 def test_an_omitted_priority_still_defaults_to_one():
     config = load(GOOD)
     assert all(room.priority == 1.0 for room in config.rooms)
+
+
+# --------------------------------------------------------------------------
+# Keys added after a release: an upgrade must not break a file that loaded
+# before it, and the default it takes must be said out loud.
+# --------------------------------------------------------------------------
+
+
+def test_the_shipped_configuration_needs_no_defaults():
+    assert load(GOOD).notices == ()
+
+
+def test_a_file_from_before_the_comfort_band_still_loads():
+    """The regression: a 0.1.x file failed on 0.3.0 with "missing required
+    key 'band'", though zero -- a single setpoint -- is what it meant."""
+    config = load(without("defaults.intent.band"))
+    assert config.intent.band == 0.0
+    assert any("defaults.intent.band" in n and "0.2.0" in n for n in config.notices)
+
+
+def test_a_file_from_before_the_stale_grace_still_loads():
+    from datetime import timedelta
+
+    config = load(without("defaults.policy.stale_grace_minutes"))
+    assert config.groups[0].policy.stale_grace == timedelta(minutes=20)
+    assert any("stale_grace_minutes" in n and "0.3.0" in n for n in config.notices)
+
+
+def test_a_defaulted_key_is_still_checked_when_present():
+    with pytest.raises(ConfigError) as caught:
+        load(changed("defaults.intent.band", -1))
+    assert "band" in str(caught.value)
+
+
+def test_only_keys_added_since_a_release_may_default():
+    """The table is the whole of the exception, and each entry must agree
+    with what the code did before the key existed."""
+    from datetime import timedelta
+
+    from core.config import ADDED_SINCE
+    from core.policy import PolicyConfig
+
+    assert set(ADDED_SINCE) == {"band", "stale_grace_minutes"}
+    assert ADDED_SINCE["band"][1] == 0.0
+    assert timedelta(minutes=ADDED_SINCE["stale_grace_minutes"][1]) == PolicyConfig.stale_grace

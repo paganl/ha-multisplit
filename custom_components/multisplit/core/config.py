@@ -11,6 +11,11 @@ Two rules shape this module:
   value: you cannot see it, you cannot change it from the config, and it turns
   up as mysterious behaviour later. The configuration is complete or it is
   rejected.
+  The one exception is a key added after a release, so a file that loaded
+  yesterday still loads after an upgrade. Those keys and their defaults are
+  listed in ``ADDED_SINCE`` -- one table, in the open -- and every one that is
+  filled in is reported back as a notice naming the key to add, so the default
+  is never silent.
 * **Problems are collected, not raised one at a time.** Someone editing YAML
   wants the whole list, not a round trip per typo.
 """
@@ -23,6 +28,16 @@ from datetime import timedelta
 
 from .model import Curve, ParticipationPolicy, RoomConfig
 from .policy import PolicyConfig, participation_problems
+
+
+#: Keys introduced after a release: key -> (version that added it, default).
+#: A file written before that version lacks them; the default here is what
+#: such a file meant, since the behaviour before the key existed is exactly
+#: the default's. Nothing else may fall back to a value defined in Python.
+ADDED_SINCE: dict[str, tuple[str, float]] = {
+    "band": ("0.2.0", 0.0),  # defaults.intent: zero is a single setpoint
+    "stale_grace_minutes": ("0.3.0", 20.0),  # any policy block
+}
 
 
 class ConfigError(ValueError):
@@ -134,6 +149,9 @@ class SystemConfig:
     intent: IntentConfig
     groups: tuple[GroupSpec, ...]
     rooms: tuple[RoomSpec, ...]
+    #: Keys from ADDED_SINCE that the file lacked and were defaulted, each
+    #: phrased as what to add. Empty for a file that says everything.
+    notices: tuple[str, ...] = ()
 
     def group(self, key: str) -> GroupSpec:
         for spec in self.groups:
@@ -159,6 +177,7 @@ class _Reader:
     def __init__(self) -> None:
         self.problems: list[str] = []
         self.missing: list[str] = []
+        self.notices: list[str] = []
 
     def fail(self, where: str, message: str) -> None:
         self.problems.append(f"{where}: {message}")
@@ -202,6 +221,22 @@ class _Reader:
         elif minimum is not None and number < minimum:
             self.fail(where, f"'{key}' must be at least {minimum:g}{suffix}")
         return number
+
+    def added_number(self, raw: Mapping, key: str, where: str, **checks) -> float:
+        """A number that may be absent because it postdates the file.
+
+        Only keys in ADDED_SINCE qualify. An absent one takes its listed
+        default and leaves a notice; a present one is read and checked like
+        any other number.
+        """
+        if key in raw:
+            return self.number(raw, key, where, **checks)
+        version, default = ADDED_SINCE[key]
+        self.notices.append(
+            f"{where}.{key} is not set; using {default:g}, the default since "
+            f"{version}. Add '{key}: {default:g}' to make it explicit."
+        )
+        return default
 
     def optional_number(self, raw: Mapping, key: str, where: str) -> float | None:
         if key not in raw:
@@ -309,11 +344,8 @@ def _policy(reader: _Reader, raw: Mapping, where: str) -> PolicyConfig:
         inertia_weight=reader.number(raw, "inertia_weight", where),
         inertia_half_life=reader.minutes(raw, "inertia_half_life_minutes", where),
         aging_rate=reader.number(raw, "aging_rate", where),
-        # Optional, so an existing multisplit.yaml keeps loading.
-        stale_grace=(
-            reader.minutes(raw, "stale_grace_minutes", where)
-            if "stale_grace_minutes" in raw
-            else PolicyConfig.stale_grace
+        stale_grace=timedelta(
+            minutes=reader.added_number(raw, "stale_grace_minutes", where, minimum=0)
         ),
     )
 
@@ -396,7 +428,7 @@ def load(raw: object) -> SystemConfig:
     intent = IntentConfig(
         default_target=reader.number(raw_intent, "default_target", "defaults.intent"),
         away_target=reader.number(raw_intent, "away_target", "defaults.intent"),
-        band=reader.number(raw_intent, "band", "defaults.intent", minimum=0),
+        band=reader.added_number(raw_intent, "band", "defaults.intent", minimum=0),
     )
     low, high = default_policy.setpoint_range
     for label, value in (
@@ -518,4 +550,5 @@ def load(raw: object) -> SystemConfig:
         intent=intent,
         groups=tuple(groups),
         rooms=tuple(rooms),
+        notices=tuple(reader.notices),
     )

@@ -74,6 +74,9 @@ back, regenerates the config and restarts the controller.
 A missing key is an error rather than a silent default — a hidden default is
 indistinguishable from a hard-coded value, since you cannot see it, cannot
 change it from the config, and it surfaces later as mysterious behaviour.
+The one exception is a key added after a release, so an upgrade does not break
+a file that loaded before it: it takes the default it has had since, and Home
+Assistant logs a warning naming the line to add.
 Where an answer is genuinely unknown the questionnaire states an assumption
 and the generated line is marked `UNMEASURED`.
 

@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.3.1 — 2026-10-29
+
+**Fixed**
+
+- **Upgrading no longer breaks a configuration that loaded before.** A file
+  written before 0.2.0 failed to load on 0.3.0 with `defaults.intent: missing
+  required key 'band'`, though the behaviour it had always had is exactly a
+  band of zero. Meanwhile `stale_grace_minutes`, added in 0.3.0, quietly fell
+  back to a value in the code, so the two new keys disagreed about the rule.
+
+  Both now follow one rule. A missing key is still an error, except a key
+  added after a release, which takes the default it has had since: those are
+  listed in one table (`ADDED_SINCE` in `core/config.py`), and each one filled
+  in is logged as a warning naming the line to add, e.g.
+  `defaults.intent.band is not set; using 0, the default since 0.2.0. Add
+  'band: 0' to make it explicit.` No default is silent.
+
 ## 0.3.0 — 2026-10-29
 
 Fixes found in the first shadow-mode telemetry (27–29 October 2026).
