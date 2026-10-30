@@ -56,6 +56,16 @@ a real install):
 - The room status sensor's `intent_source`, and `explain`, now report away.
 - The card uses Home Assistant's time zone for "now" and "next change", not
   the browser's, and finds the away switch by a marker of its own.
+- **A room steady below target was never heated when it relied on its unit's
+  own sensor.** These units publish a reading only when it changes, so by age a
+  steady room looked dead: in the first night of beta telemetry Bedroom sat at
+  19° and Erin at 18.5° for 4 and 5½ hours without being heated (in shadow
+  mode, so only on paper). A unit's own reading is now trusted while the unit
+  is reachable; one that drops off still goes unavailable and is refused.
+  Replayed over that night, the time those rooms spent cold and unheated falls
+  from 252 and 333 minutes to 28 and 22 (their normal rest periods).
+  `stale_after_minutes` now applies only to separate room sensors.
+- A stale room no longer carries a "banking solar" note it was not acting on.
 
 **Fixed**
 

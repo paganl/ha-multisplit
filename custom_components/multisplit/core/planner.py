@@ -604,7 +604,7 @@ def plan(
                     target=demand.target_for(mode or demand.wants),
                     because=(
                         f"{because} (banking solar: {_fmt(demand.banked)}° into the band)"
-                        if demand.banked
+                        if demand.banked and demand.measurement.trustworthy
                         else because
                     ),
                     wants=demand.wants,

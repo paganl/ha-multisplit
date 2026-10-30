@@ -77,6 +77,9 @@ operation:
   # guessing — a stale sensor otherwise produces a confident wrong decision
   # for the whole group. Battery sensors that report on change need a
   # generous value; a mains-powered one that reports every minute does not.
+  # Applies to the separate room sensors only: an indoor unit's own reading
+  # is trusted while the unit is reachable, because units that report only
+  # on change would otherwise look dead while a room holds steady.
   # Units: minutes.
   # UNMEASURED — assumed; the question was left blank.
   stale_after_minutes: 30.0

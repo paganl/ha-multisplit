@@ -112,7 +112,15 @@ def collect(
             if state is not None:
                 value = _as_float(state.attributes.get("current_temperature"))
                 if value is not None:
-                    stale = _age(state, now) > stale_after
+                    # Trusted while the unit itself is reachable, not by age.
+                    # These units publish a reading only when it changes, and
+                    # nothing at all while it holds -- so by age a room steady
+                    # below target looked dead and was never heated. Field
+                    # telemetry, 29-30 Oct: return-air readings flagged stale
+                    # 19-90% of the time, a value present every time, and
+                    # Bedroom and Erin left at 19° and 18.5° for hours. A unit
+                    # that drops off goes unavailable, which is still refused.
+                    stale = state.state in _UNUSABLE
                     measurement = RoomMeasurement(
                         room.key,
                         value,
