@@ -1,4 +1,5 @@
-"""What people set, kept across restarts: room schedules and the away switch.
+"""What people set, kept across restarts: room schedules, the away switch and
+each room's own away.
 
 Configuration (multisplit.yaml) is what an admin decided once; this is what
 the household changes day to day from the dashboard. It lives in Home
@@ -15,9 +16,11 @@ and a warning says which, so the owner can fix it on the card.
 from __future__ import annotations
 
 import logging
+from datetime import datetime
 
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.storage import Store
+from homeassistant.util import dt as dt_util
 
 from .const import DOMAIN
 from .core.config import SystemConfig
@@ -35,7 +38,7 @@ class StateStore:
 
     def __init__(self, hass: HomeAssistant) -> None:
         self._store: Store[dict] = Store(hass, _VERSION, _KEY)
-        self._raw: dict = {"schedules": {}, "away": False}
+        self._raw: dict = {"schedules": {}, "away": False, "rooms_away": {}}
 
     async def async_load(self) -> None:
         data = await self._store.async_load()
@@ -43,6 +46,12 @@ class StateStore:
             self._raw = {
                 "schedules": dict(data.get("schedules") or {}),
                 "away": bool(data.get("away", False)),
+                # Absent in anything saved before 0.5.0-beta.5.
+                "rooms_away": {
+                    str(room): until
+                    for room, until in dict(data.get("rooms_away") or {}).items()
+                    if until is None or isinstance(until, str)
+                },
             }
 
     async def async_flush(self) -> None:
@@ -60,6 +69,26 @@ class StateStore:
 
     def set_away(self, away: bool) -> None:
         self._raw["away"] = bool(away)
+        self._save()
+
+    # -- one room away ----------------------------------------------------
+
+    def rooms_away(self) -> dict[str, datetime | None]:
+        """Each room set away on its own, and until when (None: until cleared).
+
+        An unreadable time is treated as no end rather than dropped: the room
+        was set away on purpose, and staying away is the cautious reading.
+        """
+        out: dict[str, datetime | None] = {}
+        for room, until in self._raw["rooms_away"].items():
+            out[room] = dt_util.parse_datetime(until) if until else None
+        return out
+
+    def set_room_away(self, room: str, away: bool, until: datetime | None = None) -> None:
+        if away:
+            self._raw["rooms_away"][room] = until.isoformat() if until else None
+        else:
+            self._raw["rooms_away"].pop(room, None)
         self._save()
 
     # -- schedules -------------------------------------------------------

@@ -498,6 +498,29 @@ sections:
         unit: °C
         target: defaults.intent.away_target
         answer: 16.0
+      - id: frost_below
+        ask: Below what room temperature must a room be heated, whatever else is set?
+        why: >-
+          Frost protection. A room this cold is heated even if it is away, has
+          been switched off, has a stale sensor, or its heating is locked out
+          by the weather or the season -- every one of which can otherwise
+          leave a unit off while pipes freeze. It must sit below the away
+          target, or it would take over from the setback.
+        type: number
+        unit: °C
+        target: defaults.intent.frost_below
+        answer: 7.0
+      - id: frost_release
+        ask: Up to what temperature does frost protection keep heating?
+        why: >-
+          It latches between the two, so a room hovering at the threshold is
+          not switched on and off with the sensor's noise. The unit is asked
+          for its lowest setpoint and stopped here, because most units cannot
+          be set this low.
+        type: number
+        unit: °C
+        target: defaults.intent.frost_release
+        answer: 10.0
 
   - title: Changeover resistance
     note: >-

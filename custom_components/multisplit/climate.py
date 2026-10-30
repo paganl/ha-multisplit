@@ -12,7 +12,11 @@ modes the group currently permits. The modes offered here are only **auto** and
   when another room's demand changes.
 
 So the room expresses a target and whether it wants to take part at all, and
-the system decides the mode. ``hvac_action`` reports what is actually
+the system decides the mode. Its presets are **home** and **away**: away sends
+this room alone to the setback, through Home Assistant's own
+``climate.set_preset_mode``, so a presence automation, a voice assistant or
+any thermostat card can do it with nothing specific to this integration. The
+house-wide switch still wins -- every room shows away while it is on. ``hvac_action`` reports what is actually
 happening, and the status sensor carries the reason. Writes go to intent --
 this entity never commands a unit.
 """
@@ -20,6 +24,8 @@ this entity never commands a unit.
 from __future__ import annotations
 
 from homeassistant.components.climate import (
+    PRESET_AWAY,
+    PRESET_HOME,
     ClimateEntity,
     ClimateEntityFeature,
     HVACAction,
@@ -52,7 +58,9 @@ class RoomClimate(MultisplitRoomEntity, ClimateEntity):
         ClimateEntityFeature.TARGET_TEMPERATURE
         | ClimateEntityFeature.TURN_ON
         | ClimateEntityFeature.TURN_OFF
+        | ClimateEntityFeature.PRESET_MODE
     )
+    _attr_preset_modes = [PRESET_HOME, PRESET_AWAY]
     _attr_target_temperature_step = 0.5
     _unrecorded_attributes = frozenset(
         {
@@ -60,7 +68,7 @@ class RoomClimate(MultisplitRoomEntity, ClimateEntity):
             # What the schedule card reads. Worth having now, not as history.
             "room", "owners", "min_target", "max_target", "min_block_minutes", "schedule",
             "target_source", "override_until", "next_schedule_change", "away",
-            "default_target", "away_target",
+            "default_target", "away_target", "room_away", "room_away_until",
         }
     )
 
@@ -85,7 +93,7 @@ class RoomClimate(MultisplitRoomEntity, ClimateEntity):
     @property
     def target_temperature(self) -> float | None:
         plan = self.coordinator.data
-        if self.coordinator.is_excluded(self._room) or plan is None:
+        if self.coordinator.is_idle_excluded(self._room) or plan is None:
             override = self.coordinator.overrides.get(self._room)
             return override.target if override else None
         return plan.room(self._room).target
@@ -95,8 +103,12 @@ class RoomClimate(MultisplitRoomEntity, ClimateEntity):
         return HVACMode.OFF if self.coordinator.is_excluded(self._room) else HVACMode.AUTO
 
     @property
+    def preset_mode(self) -> str:
+        return PRESET_AWAY if self.coordinator.is_away(self._room) else PRESET_HOME
+
+    @property
     def hvac_action(self) -> HVACAction:
-        if self.coordinator.is_excluded(self._room):
+        if self.coordinator.is_idle_excluded(self._room):
             return HVACAction.OFF
         plan = self.coordinator.data
         if plan is None:
@@ -132,11 +144,15 @@ class RoomClimate(MultisplitRoomEntity, ClimateEntity):
             ),
             "next_schedule_change": change.isoformat() if change else None,
             "away": coordinator.away,
+            "room_away": coordinator.room_away(self._room),
+            "room_away_until": (
+                until.isoformat() if (until := coordinator.rooms_away.get(self._room)) else None
+            ),
         }
 
     def _plan_attributes(self) -> dict:
         plan = self.coordinator.data
-        if plan is None or self.coordinator.is_excluded(self._room):
+        if plan is None or self.coordinator.is_idle_excluded(self._room):
             return {"reason": "excluded from control at this room's request"}
         command = plan.room(self._room)
         return {
@@ -147,6 +163,7 @@ class RoomClimate(MultisplitRoomEntity, ClimateEntity):
             "group": self._spec.group,
             "group_mode": plan.group(self._spec.group).mode or "off",
             "group_reason": plan.group(self._spec.group).because,
+            "frost_protection": command.frost,
         }
 
     # -- what it writes: intent, never hardware ------------------------
@@ -157,6 +174,10 @@ class RoomClimate(MultisplitRoomEntity, ClimateEntity):
             return
         # Turned by hand: holds until the room's schedule next moves.
         await self.coordinator.async_set_from_thermostat(self._room, float(temperature))
+
+    async def async_set_preset_mode(self, preset_mode: str) -> None:
+        # Home Assistant has already refused anything not in preset_modes.
+        await self.coordinator.async_set_room_away(self._room, preset_mode == PRESET_AWAY)
 
     async def async_set_hvac_mode(self, hvac_mode: HVACMode) -> None:
         if hvac_mode == HVACMode.OFF:

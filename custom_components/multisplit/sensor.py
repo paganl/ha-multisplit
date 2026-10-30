@@ -117,7 +117,7 @@ class RoomStatusSensor(MultisplitRoomEntity, SensorEntity):
     @property
     def native_value(self) -> str:
         plan = self.coordinator.data
-        if self.coordinator.is_excluded(self._room):
+        if self.coordinator.is_idle_excluded(self._room):
             return "off"
         if plan is None:
             return "unknown"
@@ -133,7 +133,7 @@ class RoomStatusSensor(MultisplitRoomEntity, SensorEntity):
     @property
     def extra_state_attributes(self) -> dict:
         plan = self.coordinator.data
-        if self.coordinator.is_excluded(self._room):
+        if self.coordinator.is_idle_excluded(self._room):
             return {"reason": "excluded from control at this room's request"}
         if plan is None:
             return {}
@@ -161,6 +161,7 @@ class RoomStatusSensor(MultisplitRoomEntity, SensorEntity):
             else None,
             "group": self._spec.group,
             "climate_entity": self._spec.climate_entity,
+            "frost_protection": command.frost,
         }
 
 
@@ -186,7 +187,7 @@ class RoomOvershootSensor(MultisplitRoomEntity, SensorEntity):
     @property
     def native_value(self) -> float | None:
         plan = self.coordinator.data
-        if plan is None or self.coordinator.is_excluded(self._room):
+        if plan is None or self.coordinator.is_idle_excluded(self._room):
             return None
         measurement = self.coordinator.measurement_for(self._room)
         if measurement is None or measurement.temperature is None:

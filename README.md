@@ -26,8 +26,13 @@ untrue — and a room that cannot have what it asked for should be able to say
   dashboard card: one line per day, a mark wherever the temperature should
   change. Guardrails keep every mark inside the room's allowed range and
   every setting long enough not to short-cycle the compressor.
-- **Has an away mode.** One switch drops every room to its setback; a room
-  someone turns up by hand still heats.
+- **Has an away mode, for the house or one room.** One switch drops every
+  room to its setback; a room's own *away* preset does it for that room
+  alone. Away heats at the setback and never cools. A room someone turns up
+  by hand still heats.
+- **Will not let a room freeze.** Below 7° a room is heated until it reaches
+  10°, whatever else is set — away, switched off, a stale sensor, a lockout
+  or the season.
 - **Works to a comfort band, not a point.** Heat below 20, cool above 22, do
   not fuss in between — arbitrated across the whole outdoor unit rather than
   left to each indoor unit's own dual setpoint.
@@ -171,10 +176,16 @@ them either. A thermostat turned by hand is held to the same range.
 
 **What wins.** Most specific first:
 
+0. **frost protection** — a room below `frost_below` (7°) is heated until
+   `frost_release` (10°), above everything that follows and also above things
+   that are not targets at all: a room switched off, a stale sensor, a
+   lockout, the season, another room on the same outdoor unit wanting cool.
+   The unit is asked for its lowest setpoint and stopped by the release
+   threshold. A room switched off is turned off again when it is released.
 1. **turned by hand** — the room's thermostat; holds until the schedule next
    changes;
-2. **away** — the house-wide switch, or the room's own `schedule_entity`
-   being off;
+2. **away** — the house-wide switch, then the room's own away: its *away*
+   preset, or its `schedule_entity` being off;
 3. **the room's schedule**;
 4. **the default target**, for a room with no schedule yet.
 
@@ -183,6 +194,27 @@ it from the card, the dashboard or a presence automation; it survives
 restarts. Switching it either way clears manual overrides, so a tweak from the
 morning does not hold one room warm all the time the house is empty. A room
 turned up while away still heats — someone home early is not left cold.
+
+**One room away.** Each room's thermostat has the presets *home* and *away*,
+so one room can be set away with Home Assistant's own service — from a
+presence automation, a voice assistant or any thermostat card:
+
+```yaml
+action: climate.set_preset_mode
+target:
+  entity_id: climate.erin
+data:
+  preset_mode: away
+```
+
+`multisplit.set_away` does the same for several rooms at once, optionally
+until a time, after which they come back by themselves; with no room it sets
+the whole house. The house switch wins: while it is on every room shows
+*away*, and a room cannot be set back to *home* on its own.
+
+While away — house or room — a room heats at the setback and is never
+cooled: the comfort band reaches to the top of the setpoint range, so an
+empty house is not cooled down to 18° on a warm day.
 
 Schedules and the away state are kept in Home Assistant's storage
 (`.storage/multisplit.state`), so they survive restarts and are in its
@@ -361,7 +393,7 @@ wall.
 
 | Entity | What it is |
 | --- | --- |
-| `climate.<room>` | the room's comfort intent: a target, and auto or off. Writes intent, never hardware; turned by hand, it holds until the schedule next changes |
+| `climate.<room>` | the room's comfort intent: a target, auto or off, and the presets home and away. Writes intent, never hardware; turned by hand, it holds until the schedule next changes |
 | `sensor.<room>_status` | heating / cooling / waiting / standby / no data, with `reason`, `wants`, `unserved_for_minutes` |
 | `sensor.<group>_mode` | heat / cool / off, with `reason`, `scores`, `unserved` |
 | `binary_sensor.<group>_<mode>_allowed` | whether the weather permits it, with `reason` |
@@ -382,6 +414,7 @@ happening.
 | `multisplit.explain` | everything the system believes right now, and why — including the solar surplus state |
 | `multisplit.set_schedule` | replace days of a room's weekly schedule (owner or admin) |
 | `multisplit.set_room_target` | override a room's target, optionally until a time |
+| `multisplit.set_away` | rooms (or the whole house) to the away setback and back, optionally until a time |
 | `multisplit.clear_override` | back to the schedule or default |
 | `multisplit.reload` | re-read `multisplit.yaml` without restarting |
 

@@ -39,6 +39,7 @@ from .const import (
     SERVICE_CLEAR_OVERRIDE,
     SERVICE_EXPLAIN,
     SERVICE_RELOAD,
+    SERVICE_SET_AWAY,
     SERVICE_SET_ROOM_TARGET,
     SERVICE_SET_SCHEDULE,
     CARD_FILE,
@@ -67,6 +68,13 @@ SET_ROOM_TARGET_SCHEMA = vol.Schema(
     }
 )
 ROOM_SCHEMA = vol.Schema({vol.Required(ATTR_ROOM): cv.string})
+SET_AWAY_SCHEMA = vol.Schema(
+    {
+        vol.Optional(ATTR_ROOM): vol.All(cv.ensure_list, [cv.string]),
+        vol.Required("away"): cv.boolean,
+        vol.Optional(ATTR_UNTIL): cv.datetime,
+    }
+)
 
 
 def _time(value):
@@ -314,6 +322,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 SERVICE_SET_ROOM_TARGET,
                 SERVICE_CLEAR_OVERRIDE,
                 SERVICE_SET_SCHEDULE,
+                SERVICE_SET_AWAY,
             ):
                 hass.services.async_remove(DOMAIN, service)
     return unloaded
@@ -385,6 +394,28 @@ def _async_register_services(hass: HomeAssistant) -> None:
             room, list(call.data["days"]), marks, call.context
         )
 
+    async def set_away(call: ServiceCall) -> None:
+        """Rooms named: those rooms alone, optionally until a time. None: the house."""
+        rooms = call.data.get(ATTR_ROOM) or []
+        away = call.data["away"]
+        until = call.data.get(ATTR_UNTIL)
+        if until is not None and until.tzinfo is None:
+            until = until.replace(tzinfo=dt_util.get_default_time_zone())
+        if until is not None and not (rooms and away):
+            raise HomeAssistantError(
+                "'until' needs one or more rooms and away: true; the whole house "
+                "stays away until the switch is turned off"
+            )
+        if not rooms:
+            for coordinator in _coordinators(hass):
+                await coordinator.async_set_away(away)
+            return
+        # Every name checked before anything changes, so a typo in the third
+        # room does not leave the first two away.
+        targets = [(_resolve(hass, room), room) for room in rooms]
+        for coordinator, room in targets:
+            await coordinator.async_set_room_away(room, away, until)
+
     async def clear_override(call: ServiceCall) -> None:
         room = call.data[ATTR_ROOM]
         await _resolve(hass, room).async_clear_override(room)
@@ -405,4 +436,7 @@ def _async_register_services(hass: HomeAssistant) -> None:
     )
     hass.services.async_register(
         DOMAIN, SERVICE_SET_SCHEDULE, set_schedule, schema=SET_SCHEDULE_SCHEMA
+    )
+    hass.services.async_register(
+        DOMAIN, SERVICE_SET_AWAY, set_away, schema=SET_AWAY_SCHEMA
     )

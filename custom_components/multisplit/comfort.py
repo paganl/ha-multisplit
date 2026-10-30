@@ -10,8 +10,12 @@ the project's vocabulary -- ``RoomIntent``, ``intent_source`` -- only the file
 is renamed.
 
 Resolution order, most specific first: an unexpired override, then away (the
-house-wide switch or the room's own presence entity), then the room's weekly
-schedule, then the configured default -- see ``core.schedule.choose_target``. The source is carried through to the UI
+house-wide switch, then the room's own away -- its preset, or its schedule
+entity being off), then the room's weekly schedule, then the configured
+default -- see ``core.schedule.choose_target``. Frost protection sits above
+all of these, in the planner, because it has to override things that are
+not targets at all. While away, the band reaches to the top of the setpoint
+range, so an empty house is never cooled. The source is carried through to the UI
 so a room can say *why* it is aiming at what it is aiming at -- "override
 until 21:30" and "schedule" look identical on a thermostat, and that ambiguity
 is most of what makes a heating system feel haunted.
@@ -27,7 +31,7 @@ from homeassistant.util import dt as dt_util
 
 from .core.config import SystemConfig
 from .core.model import RoomIntent
-from .core.schedule import WeekSchedule, choose_target
+from .core.schedule import WeekSchedule, band_for, choose_target
 
 
 @dataclass(frozen=True)
@@ -49,6 +53,7 @@ def resolve(
     *,
     schedules: dict[str, WeekSchedule] | None = None,
     away: bool = False,
+    rooms_away: frozenset[str] = frozenset(),
 ) -> dict[str, RoomIntent]:
     """One intent per room: override, then away, then schedule, then default.
 
@@ -64,8 +69,8 @@ def resolve(
         override = overrides.get(room.key)
         live = override if override is not None and override.active(now) else None
 
-        room_away = False
-        if room.schedule_entity:
+        room_away = room.key in rooms_away
+        if not room_away and room.schedule_entity:
             state = hass.states.get(room.schedule_entity)
             room_away = state is not None and state.state == "off"
 
@@ -78,10 +83,11 @@ def resolve(
             default=config.intent.default_target,
             away=config.intent.away_target,
         )
+        ceiling = config.group(room.group).policy.setpoint_range[1]
         out[room.key] = RoomIntent(
             room=room.key,
             target=target,
-            band=band,
+            band=band_for(source, target, band, ceiling),
             source=source,
             expires_at=live.expires_at if live else None,
             priority=room.priority,

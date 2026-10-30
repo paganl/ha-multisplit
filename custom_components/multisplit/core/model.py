@@ -145,6 +145,42 @@ class RoomIntent:
 
 
 @dataclass(frozen=True)
+class FrostProtection:
+    """The floor under everything else: a room this cold is heated, whatever.
+
+    A room below ``below`` is heated until it reaches ``release``, whatever
+    its schedule, away state, override or lockouts say, and even if it has
+    been switched off -- because every one of those can otherwise leave a
+    unit off while the room freezes. It wins its group's mode outright.
+
+    The setpoint commanded is ``release`` clamped into the group's range, so
+    in practice the unit's minimum (16° on most Mitsubishi units): the unit
+    cannot be asked for 10°, so the planner asks for its lowest and stops it
+    by the release threshold instead.
+
+    Deliberately not a comfort setting. Away is the setback people choose;
+    this is what happens when the setback is not being delivered.
+    """
+
+    below: float
+    release: float
+
+    def active(self, temperature: float | None, was_active: bool) -> bool:
+        """Latched between the two thresholds, so it cannot chatter.
+
+        With no reading at all a latched room stays latched: the unit is
+        holding its own minimum setpoint on its own sensor, which is safe,
+        and dropping protection because a sensor died is the failure this
+        exists to prevent.
+        """
+        if temperature is None:
+            return was_active
+        if temperature < self.below:
+            return True
+        return was_active and temperature < self.release
+
+
+@dataclass(frozen=True)
 class ParticipationPolicy:
     """When a room's indoor unit should run, given that it cannot run gently.
 
@@ -199,6 +235,7 @@ class RoomRuntime:
     since: datetime | None = None  # last participation transition
     unserved_since: datetime | None = None  # when demand first went unserved
     untrusted_since: datetime | None = None  # when its reading stopped being trustworthy
+    frost: bool = False  # under frost protection, latched until it reaches release
 
     def elapsed(self, now: datetime) -> timedelta:
         if self.since is None:
@@ -313,6 +350,7 @@ class RoomCommand:
     unserved_for: timedelta = timedelta(0)
     heat_to: float | None = None
     cool_to: float | None = None
+    frost: bool = False  # heating because the room is below the frost threshold
 
     @property
     def standing_by(self) -> bool:

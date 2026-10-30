@@ -319,3 +319,23 @@ def choose_target(
     if scheduled is not None:
         return scheduled, "schedule"
     return default, "default"
+
+
+#: Where a target came from when it is a setback.
+AWAY_SOURCES = frozenset({"away", "away (room)"})
+
+
+def band_for(source: str, target: float, band: float, ceiling: float) -> float:
+    """The comfort band to use with a target from ``choose_target``.
+
+    Away is a setback for heating, not a target for cooling. With the normal
+    band on top of a 16° setback, a room at 21° would want cooling down to
+    18° while nobody was home -- held back only by the outdoor lockout, so on
+    the first warm day an empty house would be cooled. While away the band
+    stretches to ``ceiling``, the top of the setpoint range, so an empty
+    house heats at the setback and is never cooled below the warmest
+    setting anyone could ask for.
+    """
+    if source in AWAY_SOURCES:
+        return max(band, ceiling - target, 0.0)
+    return band

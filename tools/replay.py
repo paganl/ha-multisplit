@@ -102,6 +102,7 @@ def replay(records, config, *, outdoor=None, freshness="recorded", surplus=None)
             group_state=group_state,
             outdoor=out,
             now=now,
+            frost=config.frost,
         )
 
         runtime = {r.room: r for r in result.runtime}

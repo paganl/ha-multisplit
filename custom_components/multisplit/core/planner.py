@@ -25,6 +25,7 @@ from .model import (
     COOL,
     HEAT,
     Constraints,
+    FrostProtection,
     GroupDecision,
     GroupState,
     Plan,
@@ -96,6 +97,7 @@ class _Demand:
         "measurement",
         "intent",
         "banked",
+        "frost",
     )
 
     def __init__(
@@ -111,6 +113,7 @@ class _Demand:
         measurement: RoomMeasurement,
         intent: RoomIntent,
         banked: float = 0.0,
+        frost: bool = False,
     ) -> None:
         self.room = room
         self.wants = wants
@@ -124,6 +127,7 @@ class _Demand:
         self.measurement = measurement
         self.intent = intent
         self.banked = banked
+        self.frost = frost
 
     def target_for(self, mode: str | None) -> float:
         """Heating aims at the bottom of the band, cooling at the top."""
@@ -139,9 +143,41 @@ def _demand(
     delivering: str | None,
     outdoor: float | None,
     now: datetime,
+    *,
+    frost: FrostProtection | None = None,
+    freezing: bool = False,
+    standby: bool = False,
 ) -> _Demand:
     heat_to = constraints.clamp(intent.heat_to)
     cool_to = max(heat_to, constraints.clamp(intent.cool_to))
+
+    if freezing and frost is not None:
+        # Below the frost floor nothing else gets a say: not the schedule, not
+        # away, not a lockout, not a stale sensor, not the room being switched
+        # off. The unit is asked for its lowest setpoint -- or the room's own
+        # target, if that is higher and the room is taking part -- and the
+        # release threshold stops it, not the setpoint.
+        floor = constraints.clamp(frost.release)
+        heat_to = floor if standby else max(heat_to, floor)
+        cool_to = max(heat_to, cool_to)
+        reading = measurement.temperature
+        error = max(constraints.deadband, frost.release - reading) if reading is not None else (
+            constraints.deadband
+        )
+        return _Demand(
+            room.room,
+            HEAT,
+            HEAT,
+            HEAT,
+            error,
+            heat_to,
+            cool_to,
+            error * max(0.0, intent.priority) or constraints.deadband,
+            measurement,
+            intent,
+            0.0,
+            frost=True,
+        )
 
     # On solar, work towards the far end of the band: heat banked now is heat
     # not bought later. Only ever within the band, and policy offers it only
@@ -310,11 +346,38 @@ def _decide_mode(
     constraints: Constraints,
     state: GroupState,
     now: datetime,
+    frost: FrostProtection | None = None,
 ) -> GroupDecision:
     scores = {
         mode: sum(d.weight for d in demands if d.votes == mode)
         for mode in sorted(constraints.allowed_modes)
     }
+
+    freezing = [d for d in demands if d.frost]
+    if freezing and frost is not None:
+        # Not a vote. A room this cold is heated whatever the others want and
+        # whatever is permitted: a lockout or a season exists to save energy
+        # or comfort, and neither is worth a frozen room.
+        detail = ", ".join(
+            f"{d.room} at {_fmt(d.measurement.temperature)}°"
+            if d.measurement.temperature is not None
+            else f"{d.room} (no reading, still protected)"
+            for d in freezing
+        )
+        because = (
+            f"heat — frost protection: {detail}, heating below {_fmt(frost.below)}° "
+            f"until {_fmt(frost.release)}°"
+        )
+        if HEAT not in constraints.allowed_modes:
+            reason = constraints.reasons.get(HEAT, "heating is not permitted")
+            because += f"; overriding: {reason}"
+        others = [
+            d.room for d in demands if not d.frost and d.acts is not None and d.acts != HEAT
+        ]
+        if others:
+            because += f"; outranks {', '.join(others)}"
+        unserved = tuple(d.room for d in demands if d.acts is not None and d.acts != HEAT)
+        return GroupDecision(group, HEAT, because, scores, unserved)
 
     # Changeover inertia: staying put earns a bonus that decays with time
     # since the last change. A marginal demand cannot flip the mode; a strong
@@ -395,6 +458,7 @@ def _participate(
     runtime: RoomRuntime,
     outdoor: float | None,
     now: datetime,
+    frost_release: float | None = None,
 ) -> tuple[str | None, str]:
     """Decide whether this room's unit should be running right now.
 
@@ -409,6 +473,30 @@ def _participate(
     real answer is a stale sensor or a reached cut-off.
     """
     policy = room.participation
+
+    if demand.frost:
+        reading = demand.measurement.temperature
+        if reading is None:
+            return HEAT, (
+                "heating — frost protection, with no reading: holding "
+                f"{_fmt(demand.heat_to)}° on the unit's own sensor"
+            )
+        return HEAT, (
+            f"heating — frost protection: {_fmt(reading)}° is too cold, heating "
+            f"until {_fmt(frost_release)}°"
+            if frost_release is not None
+            else f"heating — frost protection at {_fmt(reading)}°"
+        )
+
+    if mode is not None and mode not in constraints.allowed_modes:
+        # The group is heating only because another room is below the frost
+        # floor. Everyone else still honours the lockout.
+        reason = constraints.reasons.get(mode, f"{mode} is not permitted")
+        verb = "stopped" if runtime.running else "standing by"
+        return None, (
+            f"{verb} — the group is heating only for frost protection elsewhere; "
+            f"{reason}"
+        )
 
     temperature = demand.measurement.temperature or 0.0
     cut_off = policy.cut_off(outdoor)
@@ -557,8 +645,18 @@ def plan(
     group_state: Mapping[str, GroupState],
     outdoor: float | None,
     now: datetime,
+    frost: FrostProtection | None = None,
+    standby: frozenset[str] = frozenset(),
 ) -> Plan:
-    """Turn facts into a plan. Pure: same inputs, same plan, always."""
+    """Turn facts into a plan. Pure: same inputs, same plan, always.
+
+    ``standby`` names rooms switched off at their own request. They ask for
+    nothing, vote for nothing and are given no command -- their unit is left
+    alone -- unless they fall below ``frost``'s threshold, when they are
+    heated like any other frost-protected room. When that protection ends,
+    such a room is commanded off once, undoing what frost protection did,
+    and is then left alone again.
+    """
     by_group: dict[str, list[RoomConfig]] = {}
     for room in rooms:
         by_group.setdefault(room.group, []).append(room)
@@ -567,34 +665,84 @@ def plan(
     commands: list[RoomCommand] = []
     next_runtime: list[RoomRuntime] = []
 
-    for group, members in by_group.items():
+    def measured(name: str) -> RoomMeasurement:
+        return measurements.get(name, RoomMeasurement(name, None, stale=True))
+
+    for group, all_members in by_group.items():
         limits = constraints.get(group, Constraints())
         state = group_state.get(group, GroupState(group))
+
+        # Judged on the last reading even when it is stale: a room last seen
+        # at 6° is no less cold for its sensor having gone quiet.
+        freezing = {
+            room.room: frost is not None
+            and frost.active(
+                measured(room.room).temperature,
+                runtime.get(room.room, RoomRuntime(room.room)).frost,
+            )
+            for room in all_members
+        }
+
+        members: list[RoomConfig] = []
+        for room in all_members:
+            if room.room not in standby or freezing[room.room]:
+                members.append(room)
+                continue
+            was = runtime.get(room.room, RoomRuntime(room.room))
+            if was.frost:
+                # Protection has just ended for a room that is switched off:
+                # put its unit back the way it is meant to be, once. Its
+                # memory is not carried on, exactly as for any switched-off
+                # room.
+                reading = measured(room.room).temperature
+                commands.append(
+                    RoomCommand(
+                        room=room.room,
+                        mode=None,
+                        target=limits.clamp(frost.release) if frost else 0.0,
+                        because=(
+                            "stopped — frost protection released"
+                            + (f" at {_fmt(reading)}°" if reading is not None else "")
+                            + "; this room is switched off"
+                        ),
+                    )
+                )
+
+        if not members:
+            continue
 
         demands = {
             room.room: _demand(
                 room,
-                measurements.get(
-                    room.room, RoomMeasurement(room.room, None, stale=True)
-                ),
+                measured(room.room),
                 intents.get(room.room, RoomIntent(room.room, 20.0)),
                 runtime.get(room.room, RoomRuntime(room.room)),
                 limits,
                 state.mode,
                 outdoor,
                 now,
+                frost=frost,
+                freezing=freezing[room.room],
+                standby=room.room in standby,
             )
             for room in members
         }
 
-        decision = _decide_mode(group, list(demands.values()), limits, state, now)
+        decision = _decide_mode(group, list(demands.values()), limits, state, now, frost)
         decisions.append(decision)
 
         for room in members:
             demand = demands[room.room]
             was = runtime.get(room.room, RoomRuntime(room.room))
             mode, because = _participate(
-                room, decision.mode, demand, limits, was, outdoor, now
+                room,
+                decision.mode,
+                demand,
+                limits,
+                was,
+                outdoor,
+                now,
+                frost.release if frost is not None else None,
             )
 
             commands.append(
@@ -611,6 +759,7 @@ def plan(
                     unserved_for=was.unserved_for(now),
                     heat_to=demand.heat_to,
                     cool_to=demand.cool_to,
+                    frost=demand.frost,
                 )
             )
 
@@ -642,6 +791,7 @@ def plan(
                     since=now if changed else was.since,
                     unserved_since=(was.unserved_since or now) if starved else None,
                     untrusted_since=None if trusted else (was.untrusted_since or now),
+                    frost=demand.frost,
                 )
             )
 

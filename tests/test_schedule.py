@@ -217,3 +217,59 @@ def test_marks_in_storage_form_round_trip_through_the_service_shape():
     """The card and the service send {"at": "07:00", "temperature": 20}."""
     raw = {"mon": [{"at": "07:00", "temperature": 20}], "sun": []}
     assert WeekSchedule.from_dict(raw).as_dict()["mon"] == [{"at": "07:00", "temperature": 20.0}]
+
+
+# -- away never cools ---------------------------------------------------------
+
+from core.model import COOL, Constraints, Curve, GroupState, ParticipationPolicy  # noqa: E402
+from core.model import RoomConfig, RoomIntent, RoomMeasurement  # noqa: E402
+from core.planner import plan  # noqa: E402
+from core.schedule import band_for  # noqa: E402
+
+
+def test_away_stretches_the_band_to_the_top_of_the_range():
+    assert band_for("away", 16.0, 2.0, 26.0) == 10.0
+    assert band_for("away (room)", 16.0, 2.0, 26.0) == 10.0
+
+
+def test_every_other_source_keeps_its_band():
+    for source in ("schedule", "default", "override"):
+        assert band_for(source, 20.0, 2.0, 26.0) == 2.0
+
+
+def test_a_band_already_wider_than_the_range_is_kept():
+    assert band_for("away", 16.0, 12.0, 26.0) == 12.0
+
+
+def _warm_room(target, band, source):
+    """A warm afternoon, cooling permitted, a room at 23°."""
+    intent = RoomIntent("erin", target, band=band_for(source, target, band, 26.0), source=source)
+    return plan(
+        rooms=[
+            RoomConfig(
+                "erin",
+                "a",
+                ParticipationPolicy(Curve.constant(0.3), Curve.constant(1200.0)),
+            )
+        ],
+        measurements={"erin": RoomMeasurement("erin", 23.0)},
+        intents={"erin": intent},
+        constraints={"a": Constraints(setpoint_range=(16.0, 26.0))},
+        runtime={},
+        group_state={"a": GroupState("a")},
+        outdoor=25.0,
+        now=at(0, 15).replace(tzinfo=None),
+    )
+
+
+def test_an_empty_house_on_a_warm_day_is_not_cooled():
+    """Field telemetry, 29 Oct: away made every room above 18° want cool,
+    held back only by the outdoor lockout."""
+    away = _warm_room(16.0, 2.0, "away")
+    assert away.room("erin").wants is None
+    assert away.room("erin").mode is None
+
+
+def test_the_same_room_at_home_is_still_cooled():
+    home = _warm_room(20.0, 2.0, "schedule")
+    assert home.room("erin").wants == COOL

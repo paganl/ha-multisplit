@@ -95,6 +95,7 @@ def record_for(
                     [i.heat_to, i.cool_to] if (i := intents.get(command.room)) else None
                 ),
                 "intent_source": (i.source if (i := intents.get(command.room)) else None),
+                "frost": command.frost,
             }
             for command in plan.rooms
         },

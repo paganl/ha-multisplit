@@ -30,6 +30,7 @@ from .core.policy import constraints_for
 from .comfort import Override
 from .core.model import RoomIntent
 from .core.schedule import (
+    AWAY_SOURCES,
     Mark,
     ScheduleError,
     WeekSchedule,
@@ -67,6 +68,8 @@ class MultisplitCoordinator(DataUpdateCoordinator[Plan]):
         self.overrides: dict[str, Override] = {}
         self.store = StateStore(hass)
         self.schedules: dict[str, WeekSchedule] = {}
+        #: Rooms set away on their own, and until when (None: until cleared).
+        self.rooms_away: dict[str, datetime | None] = {}
         self.intents: dict[str, RoomIntent] = {}
         self.excluded: set[str] = set()
         self.pending: tuple[str, ...] = ()
@@ -142,6 +145,12 @@ class MultisplitCoordinator(DataUpdateCoordinator[Plan]):
             _LOGGER.debug("multisplit: override for %s expired", room)
             self.overrides.pop(room, None)
 
+        for room, until in list(self.rooms_away.items()):
+            if until is not None and now >= until:
+                _LOGGER.info("multisplit: %s is back from away (it was set until %s)", room, until)
+                self.rooms_away.pop(room)
+                self.store.set_room_away(room, False)
+
         outdoor = measurement.read_outdoor(self.hass, self.config)
         surplus_reading = measurement.read_surplus(self.hass, self.config)
         surplus = self.surplus.update(surplus_reading, now)
@@ -153,6 +162,7 @@ class MultisplitCoordinator(DataUpdateCoordinator[Plan]):
             now,
             schedules=self.schedules,
             away=self.store.away,
+            rooms_away=frozenset(self.rooms_away),
         )
         self.intents = intents
 
@@ -169,16 +179,13 @@ class MultisplitCoordinator(DataUpdateCoordinator[Plan]):
             key: limits.allowed_modes for key, limits in self._constraints.items()
         }
 
-        # A room switched off asks for nothing and votes for nothing. Leaving
-        # it out of the plan entirely is the honest encoding: the alternative,
-        # a room with demand that is never served, is exactly the starvation
-        # the aging term exists to prevent and would age forever.
-        participating = [
-            room for room in self.config.rooms if room.key not in self.excluded
-        ]
-
+        # A room switched off asks for nothing, votes for nothing and is given
+        # no command -- the planner leaves it out, exactly as before, because
+        # a room with demand that is never served is the starvation the aging
+        # term exists to prevent and would age forever. It is still passed in,
+        # as standby, for one reason: frost protection reaches it too.
         plan = make_plan(
-            rooms=[room.as_room_config() for room in participating],
+            rooms=[room.as_room_config() for room in self.config.rooms],
             measurements=measurements,
             intents=intents,
             constraints=self._constraints,
@@ -186,6 +193,8 @@ class MultisplitCoordinator(DataUpdateCoordinator[Plan]):
             group_state=self._group_state,
             outdoor=outdoor,
             now=now,
+            frost=self.config.frost,
+            standby=frozenset(self.excluded),
         )
 
         self._runtime = {runtime.room: runtime for runtime in plan.runtime}
@@ -288,6 +297,10 @@ class MultisplitCoordinator(DataUpdateCoordinator[Plan]):
         """Read stored schedules and away before the first cycle."""
         await self.store.async_load()
         self.schedules = self.store.schedules(self.config)
+        known = {room.key for room in self.config.rooms}
+        self.rooms_away = {
+            room: until for room, until in self.store.rooms_away().items() if room in known
+        }
 
     @property
     def away(self) -> bool:
@@ -305,6 +318,51 @@ class MultisplitCoordinator(DataUpdateCoordinator[Plan]):
         self.store.set_away(away)
         self.overrides.clear()
         _LOGGER.info("multisplit: away %s; manual overrides cleared", "on" if away else "off")
+        await self.async_request_refresh()
+
+    def room_away(self, room: str) -> bool:
+        """Whether this room is set away on its own (the house may be too)."""
+        return room in self.rooms_away
+
+    def is_away(self, room: str) -> bool:
+        """Whether this room is holding the setback, for whichever reason."""
+        intent = self.intents.get(room)
+        if intent is not None:
+            return intent.source in AWAY_SOURCES
+        return self.away or self.room_away(room)
+
+    async def async_set_room_away(
+        self, room: str, away: bool, until: datetime | None = None
+    ) -> None:
+        """One room to its setback, or back -- the house switch still wins.
+
+        Like the house switch, it clears the room's own override either way:
+        a tweak from this morning should not keep an empty room warm, and one
+        made while it was away has served its purpose once it is back.
+        """
+        name = next(r.name for r in self.config.rooms if r.key == room)
+        if not away and self.away:
+            raise ServiceValidationError(
+                f"{name} cannot come back on its own while the whole house is away; "
+                "switch Multi-split away off, or turn the room's thermostat up to "
+                "heat it while the house stays away"
+            )
+        if away and until is not None and until <= dt_util.utcnow():
+            raise ServiceValidationError(f"{name}: 'until' is already in the past")
+        if away:
+            self.rooms_away[room] = until
+        elif room not in self.rooms_away:
+            return
+        else:
+            self.rooms_away.pop(room)
+        self.store.set_room_away(room, away, until)
+        self.overrides.pop(room, None)
+        _LOGGER.info(
+            "multisplit: %s away %s%s; its override cleared",
+            room,
+            "on" if away else "off",
+            f" until {until.isoformat()}" if away and until else "",
+        )
         await self.async_request_refresh()
 
     def next_change(self, room: str) -> datetime | None:
@@ -377,6 +435,20 @@ class MultisplitCoordinator(DataUpdateCoordinator[Plan]):
     def is_excluded(self, room: str) -> bool:
         return room in self.excluded
 
+    def is_idle_excluded(self, room: str) -> bool:
+        """Switched off and left alone -- not being frost-protected right now."""
+        return room in self.excluded and self.command_for(room) is None
+
+    def command_for(self, room: str):
+        """This cycle's command for a room, or None when it has none."""
+        plan = self.data
+        if plan is None:
+            return None
+        try:
+            return plan.room(room)
+        except KeyError:
+            return None
+
     async def async_exclude(self, room: str) -> None:
         """Take a room out of control entirely, at its own request."""
         self.excluded.add(room)
@@ -406,7 +478,9 @@ class MultisplitCoordinator(DataUpdateCoordinator[Plan]):
         excluded = {
             key: {"mode": None, "because": "excluded from control at this room's request"}
             for key in sorted(self.excluded)
-            if room is None or key == room
+            if (room is None or key == room)
+            # A switched-off room under frost protection has a real command.
+            and not any(command.room == key for command in plan.rooms)
         }
         rooms = {
             command.room: {
@@ -417,6 +491,11 @@ class MultisplitCoordinator(DataUpdateCoordinator[Plan]):
                 "unserved_for_minutes": round(command.unserved_for.total_seconds() / 60, 1),
                 "target_source": (
                     intent.source if (intent := self.intents.get(command.room)) else None
+                ),
+                "frost_protection": command.frost,
+                "room_away": self.room_away(command.room),
+                "room_away_until": (
+                    until.isoformat() if (until := self.rooms_away.get(command.room)) else None
                 ),
                 "next_schedule_change": (
                     change.isoformat() if (change := self.next_change(command.room)) else None
@@ -429,6 +508,12 @@ class MultisplitCoordinator(DataUpdateCoordinator[Plan]):
             "at": plan.at.isoformat(),
             "apply_to_hardware": self.config.operation.apply_to_hardware,
             "away": self.away,
+            "rooms_away": sorted(self.rooms_away),
+            "frost_protection": (
+                {"below": self.config.frost.below, "release": self.config.frost.release}
+                if self.config.frost
+                else "off"
+            ),
             "energy": (
                 self.surplus.describe(plan.at)
                 if self.config.energy.surplus_sensor

@@ -11,6 +11,7 @@ import pytest
 import yaml
 
 from core.config import ConfigError, load
+from core.model import FrostProtection
 
 ROOT = Path(__file__).resolve().parent.parent
 GOOD = yaml.safe_load((ROOT / "multisplit.yaml").read_text(encoding="utf-8"))
@@ -295,9 +296,16 @@ def test_only_keys_added_since_a_release_may_default():
 
     assert set(ADDED_SINCE) == {
         "band", "stale_grace_minutes", "surplus_sensor", "settle_minutes", "solar_boost",
-        "min_block_minutes",
+        "min_block_minutes", "frost_below", "frost_release",
     }
     assert ADDED_SINCE["band"][1] == 0.0
+    # The deliberate exception: a file from before frost protection loads
+    # with it on, because "no floor" is not a safe thing to have meant.
+    from core.config import SystemConfig
+
+    assert SystemConfig.frost == FrostProtection(
+        ADDED_SINCE["frost_below"][1], ADDED_SINCE["frost_release"][1]
+    )
     assert timedelta(minutes=ADDED_SINCE["stale_grace_minutes"][1]) == PolicyConfig.stale_grace
     # Every 0.4.0 default must mean "behave as before": never bank.
     assert ADDED_SINCE["surplus_sensor"][1] is None
@@ -387,3 +395,57 @@ def test_a_group_with_its_own_narrower_range_still_loads():
     raw["groups"]["b"]["policy"] = policy
     config = load(raw)  # away_target 16 sits below group b's 18, as it could before
     assert config.guardrails("erin").min_target == 18.0
+
+
+# --------------------------------------------------------------------------
+# Frost protection
+# --------------------------------------------------------------------------
+
+
+def _intent(raw):
+    return raw["defaults"]["intent"]
+
+
+def _copy():
+    import copy
+
+    return copy.deepcopy(GOOD)
+
+
+def test_the_shipped_configuration_protects_against_frost():
+    assert load(GOOD).frost == FrostProtection(7.0, 10.0)
+
+
+def test_a_file_from_before_frost_protection_still_gets_it_and_is_told():
+    raw = _copy()
+    del _intent(raw)["frost_below"], _intent(raw)["frost_release"]
+    config = load(raw)
+    assert config.frost == FrostProtection(7.0, 10.0)
+    assert sum("frost_" in notice for notice in config.notices) == 2
+
+
+def test_frost_protection_can_be_turned_off_but_only_whole():
+    raw = _copy()
+    _intent(raw)["frost_below"] = None
+    _intent(raw)["frost_release"] = None
+    assert load(raw).frost is None
+
+    _intent(raw)["frost_release"] = 10.0
+    with pytest.raises(ConfigError, match="both be set or both be null"):
+        load(raw)
+
+
+@pytest.mark.parametrize(
+    "below, release, message",
+    [
+        (10.0, 8.0, "must be above 'frost_below'"),
+        (7.0, 7.0, "must be above 'frost_below'"),
+        (16.0, 18.0, "must be below the away target"),
+    ],
+)
+def test_frost_thresholds_that_could_not_work_are_refused(below, release, message):
+    raw = _copy()
+    _intent(raw)["frost_below"] = below
+    _intent(raw)["frost_release"] = release
+    with pytest.raises(ConfigError, match=message):
+        load(raw)

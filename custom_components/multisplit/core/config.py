@@ -26,7 +26,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import timedelta
 
-from .model import Curve, ParticipationPolicy, RoomConfig
+from .model import Curve, FrostProtection, ParticipationPolicy, RoomConfig
 from .policy import PolicyConfig, participation_problems
 from .schedule import Guardrails
 
@@ -42,6 +42,12 @@ ADDED_SINCE: dict[str, tuple[str, float | None]] = {
     "settle_minutes": ("0.4.0", 10.0),  # energy
     "solar_boost": ("0.4.0", 0.0),  # any policy block: zero never banks
     "min_block_minutes": ("0.5.0", 30.0),  # defaults.intent
+    # defaults.intent. The one exception to "the default is what the old file
+    # meant": a file from before frost protection meant no floor at all, but
+    # loading it without one would leave a switched-off or locked-out room to
+    # freeze. It is defaulted on, and the notice says so. Null turns it off.
+    "frost_below": ("0.5.0", 7.0),
+    "frost_release": ("0.5.0", 10.0),
 }
 
 
@@ -178,6 +184,8 @@ class SystemConfig:
     groups: tuple[GroupSpec, ...]
     rooms: tuple[RoomSpec, ...]
     energy: EnergyConfig = EnergyConfig(None, timedelta(minutes=10))
+    #: The floor under every other setting; None only if the file turns it off.
+    frost: FrostProtection | None = FrostProtection(7.0, 10.0)
     #: Keys from ADDED_SINCE that the file lacked and were defaulted, each
     #: phrased as what to add. Empty for a file that says everything.
     notices: tuple[str, ...] = ()
@@ -497,7 +505,15 @@ def load(raw: object) -> SystemConfig:
             )
         ),
     )
+    frost = _frost(reader, raw_intent, "defaults.intent")
     low, high = default_policy.setpoint_range
+    if frost is not None and frost.below >= intent.away_target:
+        reader.fail(
+            "defaults.intent",
+            f"'frost_below' of {frost.below:g}° must be below the away target of "
+            f"{intent.away_target:g}°, or frost protection would take over from "
+            "the setback every time the house was away",
+        )
     for label, value in (
         ("default_target", intent.default_target),
         ("away_target", intent.away_target),
@@ -673,5 +689,34 @@ def load(raw: object) -> SystemConfig:
         groups=tuple(groups),
         rooms=tuple(rooms),
         energy=energy,
+        frost=frost,
         notices=tuple(reader.notices),
     )
+
+
+def _frost(reader: _Reader, raw: Mapping, where: str) -> FrostProtection | None:
+    """Both thresholds, or neither: a null in either turns protection off."""
+    values: dict[str, float | None] = {}
+    for key in ("frost_below", "frost_release"):
+        if key not in raw:
+            values[key] = reader._defaulted(key, where)
+        elif raw[key] is None:
+            values[key] = None
+        else:
+            values[key] = reader.number(raw, key, where)
+    below, release = values["frost_below"], values["frost_release"]
+    if below is None or release is None:
+        if (below is None) != (release is None):
+            reader.fail(
+                where,
+                "'frost_below' and 'frost_release' must both be set or both be null",
+            )
+        return None
+    if not 0 < below < release:
+        reader.fail(
+            where,
+            f"'frost_release' of {release:g}° must be above 'frost_below' of {below:g}°, "
+            "and both above zero, or protection could not latch",
+        )
+        return None
+    return FrostProtection(below, release)

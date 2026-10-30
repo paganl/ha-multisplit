@@ -85,3 +85,35 @@ set_schedule:
       example: '[{"at": "06:30", "temperature": 20}, {"at": "22:00", "temperature": 17}]'
       selector:
         object:
+
+set_away:
+  name: Set away
+  description: >-
+    Send rooms to the away setback, or bring them back. Name one or more rooms
+    to set just those -- the same as setting each room's thermostat preset to
+    away -- optionally until a time, after which they return on their own.
+    Leave the room empty to set the whole house, like the Multi-split away
+    switch. Either way the rooms' manual overrides are cleared. While away a
+    room heats at the setback and is never cooled; frost protection still
+    applies.
+  fields:
+    room:
+      name: Rooms
+      description: One room's key or a list of them. Leave empty for the whole house.
+      example: erin
+      selector:
+        text:
+          multiple: true
+    away:
+      name: Away
+      required: true
+      example: true
+      selector:
+        boolean:
+    until:
+      name: Until
+      description: >-
+        When the rooms should come back by themselves. Only with rooms and
+        away on; leave empty to stay away until set back.
+      selector:
+        datetime:

@@ -24,6 +24,23 @@ the planner gave every room the same 20°.
 - **Away mode**: `switch.multisplit_away` sets every room to the away target,
   survives restarts, and clears manual overrides when switched either way. A
   room turned up by hand while away still heats.
+- **One room away**: every room's thermostat has the presets *home* and
+  *away*, so Home Assistant's own `climate.set_preset_mode` sends one room to
+  the setback — from a presence automation, a voice assistant or any
+  thermostat card. `multisplit.set_away` does it for several rooms, optionally
+  `until` a time, or for the whole house with no room named. Like the house
+  switch, it clears that room's override and survives restarts. The house
+  switch wins: while it is on, a room cannot be set back to *home* alone.
+- **Frost protection**, above everything else: a room below `frost_below`
+  (7°) is heated until `frost_release` (10°) whatever its schedule, away
+  state or override, and also when it has been switched off, its sensor has
+  gone stale, heating is locked out by the weather or the season, or another
+  room on the same outdoor unit wants cool. The unit is asked for its lowest
+  setpoint and stopped at the release threshold; other rooms still honour
+  their lockouts. A switched-off room is turned off again once released. Both
+  thresholds are new questions in the questionnaire; a file without them
+  loads with protection on and a notice saying so — the one default that is
+  not "behave as before", because no floor is not a safe thing to have meant.
 - `multisplit.set_schedule` service; `explain`, the room entities and
   telemetry now say where each target came from (`override`, `away`,
   `schedule`, `default`), and telemetry records `away`.
@@ -37,6 +54,12 @@ the planner gave every room the same 20°.
 
 **Fixed during the beta** (from an independent review, before any report from
 a real install):
+
+- **Away would have cooled an empty house.** The setback kept the normal 2°
+  band, so every room above 18° wanted cooling while away — in field telemetry
+  on 29 October, four of five rooms, held back only by the outdoor lockout.
+  While away the band now reaches to the top of the setpoint range: away heats
+  at the setback and never cools.
 
 - An override with an `until` time from the UI's date picker (no time zone)
   made every cycle fail; it is now read as local time. This predates 0.5.0.

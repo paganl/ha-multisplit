@@ -21,6 +21,7 @@ SERVICE_EXPLAIN = "explain"
 SERVICE_SET_ROOM_TARGET = "set_room_target"
 SERVICE_CLEAR_OVERRIDE = "clear_override"
 SERVICE_SET_SCHEDULE = "set_schedule"
+SERVICE_SET_AWAY = "set_away"
 
 #: Where the schedule card is served from. The integration serves it itself,
 #: so it needs no separate install and no dashboard resource.
