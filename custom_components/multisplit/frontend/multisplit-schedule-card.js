@@ -114,7 +114,8 @@ class MultisplitScheduleCard extends HTMLElement {
     this._week = null; // [[{minute, temperature}], ...] being edited
     this._saved = null; // JSON of the week as last read from the entity
     this._dirty = new Set();
-    this._selected = null; // {day, index}
+    this._selected = null; // {day, mark}
+    this._openDay = null; // the day shown as a list, or null
     this._drag = null;
     this._error = null;
     this._saving = false;
@@ -183,7 +184,7 @@ class MultisplitScheduleCard extends HTMLElement {
   _selectRoom(entity) {
     this._room = entity;
     this._dirty.clear();
-    this._selected = null;
+    this._openDay = null;
     this._error = null;
     this._load();
   }
@@ -198,7 +199,6 @@ class MultisplitScheduleCard extends HTMLElement {
   }
 
   _canEdit() {
-    const a = this._attrs();
     const user = this._hass.user || {};
     if (user.is_admin) return true;
     const me = [String(user.id || "").toLowerCase(), String(user.name || "").trim().toLowerCase()];
@@ -229,6 +229,11 @@ class MultisplitScheduleCard extends HTMLElement {
     };
   }
 
+  /* A finger rather than a mouse: phones and most tablets. */
+  _touchFirst() {
+    return typeof matchMedia === "function" && matchMedia("(hover: none)").matches;
+  }
+
   // -- editing -----------------------------------------------------------
 
   _touch(day) {
@@ -252,6 +257,7 @@ class MultisplitScheduleCard extends HTMLElement {
     const { lo, hi } = this._limits();
     let at = clamp(Math.round(minute / SNAP) * SNAP, 0, DAY - SNAP);
     while (!this._free(day, at) && at < DAY - SNAP) at += SNAP;
+    while (!this._free(day, at) && at > 0) at -= SNAP;
     if (!this._free(day, at)) return null;
     const mark = { minute: at, temperature: clamp(this._valueAt(day, at), lo, hi) };
     this._week[day].push(mark);
@@ -260,31 +266,36 @@ class MultisplitScheduleCard extends HTMLElement {
     return mark;
   }
 
-  _removeSelected() {
-    if (!this._selected) return;
-    const { day, mark } = this._selected;
-    this._week[day] = this._week[day].filter((m) => m !== mark);
-    this._touch(day);
-    this._selected = null;
-    this._render();
+  /* The list's "Add mark": an hour after the last one, or 07:00 on an empty day. */
+  _addToDay(day) {
+    const marks = this._week[day];
+    const after = marks.length ? Math.min(marks[marks.length - 1].minute + 60, DAY - SNAP) : 7 * 60;
+    return this._addMark(day, after);
   }
 
-  _nudgeTemp(delta) {
-    if (!this._selected) return;
+  _setTemp(day, mark, value) {
     const { lo, hi } = this._limits();
-    const { day, mark } = this._selected;
-    mark.temperature = clamp(Math.round((mark.temperature + delta) / STEP) * STEP, lo, hi);
+    mark.temperature = clamp(Math.round(value / STEP) * STEP, lo, hi);
     this._touch(day);
-    this._render();
   }
 
-  _moveSelected(minute) {
-    if (!this._selected) return;
-    const { day, mark } = this._selected;
+  /* Move a mark to a time; refuses a time another mark on that day holds. */
+  _setTime(day, mark, minute) {
     const at = clamp(Math.round(minute / SNAP) * SNAP, 0, DAY - SNAP);
-    if (at === mark.minute || !this._free(day, at, mark)) return;
+    if (at === mark.minute) return true;
+    if (!this._free(day, at, mark)) {
+      this._error = `${DAY_LONG[day]} already has a mark at ${hhmm(at)}.`;
+      return false;
+    }
     mark.minute = at;
     this._touch(day);
+    return true;
+  }
+
+  _removeMark(day, mark) {
+    this._week[day] = this._week[day].filter((m) => m !== mark);
+    this._touch(day);
+    if (this._selected && this._selected.mark === mark) this._selected = null;
   }
 
   _copyDay(from, targets) {
@@ -293,12 +304,10 @@ class MultisplitScheduleCard extends HTMLElement {
       this._week[d] = this._week[from].map((m) => ({ ...m }));
       this._touch(d);
     }
-    this._render();
   }
 
   _discard() {
     this._dirty.clear();
-    this._selected = null;
     this._error = null;
     this._load();
     this._render();
@@ -336,6 +345,11 @@ class MultisplitScheduleCard extends HTMLElement {
     await this._hass.callService("switch", on ? "turn_off" : "turn_on", { entity_id: id });
   }
 
+  _openDayList(day, mark = null) {
+    this._openDay = day;
+    this._selected = mark ? { day, mark } : null;
+  }
+
   // -- pointer -----------------------------------------------------------
 
   _minuteFromEvent(track, ev) {
@@ -343,59 +357,77 @@ class MultisplitScheduleCard extends HTMLElement {
     return ((ev.clientX - r.left) / r.width) * DAY;
   }
 
+  /* A press on a day line becomes one of four things, decided when it ends:
+   *   - a drag, if it started on a mark and moved sideways;
+   *   - nothing, if it moved -- the page was being scrolled;
+   *   - with a mouse on an empty spot, a new mark there;
+   *   - otherwise, that day opened as a list (with the mark picked, if any).
+   * Nothing happens on the way down, so a finger scrolling the dashboard
+   * never leaves a mark behind. */
   _onTrackDown(ev, day) {
-    if (!this._canEdit() || ev.button > 0) return;
+    if (ev.button > 0) return;
     const track = ev.currentTarget;
     const flag = ev.target.closest(".flag");
-    let mark;
-    if (flag) {
-      mark = this._week[day][Number(flag.dataset.index)];
-      this._selected = { day, mark };
-    } else {
-      mark = this._addMark(day, this._minuteFromEvent(track, ev));
-      if (!mark) return;
-    }
-    ev.preventDefault();
-    this._drag = { day, mark, track, startX: ev.clientX, moved: false };
+    const mark = flag ? this._week[day][Number(flag.dataset.index)] : null;
+    const editable = this._canEdit();
+    const press = { x: ev.clientX, y: ev.clientY, dragging: false };
+    if (mark && editable && ev.pointerType === "mouse") ev.preventDefault();
+
     const move = (e) => {
-      if (Math.abs(e.clientX - this._drag.startX) > 3) this._drag.moved = true;
-      if (!this._drag.moved) return;
-      this._moveSelected(this._minuteFromEvent(track, e));
+      const dx = e.clientX - press.x;
+      const dy = e.clientY - press.y;
+      if (!press.dragging) {
+        if (!(mark && editable) || Math.abs(dx) < 6 || Math.abs(dx) < Math.abs(dy)) return;
+        press.dragging = true;
+        this._drag = press;
+        this._openDayList(day, mark);
+      }
+      this._setTime(day, mark, this._minuteFromEvent(track, e));
+      this._error = null;
       this._renderRow(day);
     };
-    const up = () => {
+    const end = (e) => {
       window.removeEventListener("pointermove", move);
-      window.removeEventListener("pointerup", up);
-      window.removeEventListener("pointercancel", up);
+      window.removeEventListener("pointerup", end);
+      window.removeEventListener("pointercancel", end);
+      const dragged = press.dragging;
       this._drag = null;
+      if (dragged) return this._render(".flag.selected");
+      if (e.type === "pointercancel") return; // the browser took it for a scroll
+      if (Math.hypot(e.clientX - press.x, e.clientY - press.y) > 8) return;
+      if (mark) this._openDayList(day, mark);
+      else if (editable && ev.pointerType === "mouse") {
+        const added = this._addMark(day, this._minuteFromEvent(track, e));
+        this._openDayList(day, added);
+      } else this._openDayList(day);
       this._render();
-      const sel = this.shadowRoot.querySelector(".flag.selected");
-      if (sel) sel.focus({ preventScroll: true });
     };
     window.addEventListener("pointermove", move);
-    window.addEventListener("pointerup", up);
-    window.addEventListener("pointercancel", up);
-    this._renderRow(day);
+    window.addEventListener("pointerup", end);
+    window.addEventListener("pointercancel", end);
   }
 
   _onFlagKey(ev, day, index) {
-    if (!this._canEdit()) return;
     const mark = this._week[day][index];
+    if (ev.key === "Enter" || ev.key === " ") {
+      ev.preventDefault();
+      this._openDayList(day, mark);
+      return this._render(".panel li.selected .time");
+    }
+    if (!this._canEdit()) return;
     this._selected = { day, mark };
     const keys = {
-      ArrowLeft: () => this._moveSelected(mark.minute - SNAP),
-      ArrowRight: () => this._moveSelected(mark.minute + SNAP),
-      ArrowUp: () => this._nudgeTemp(STEP),
-      ArrowDown: () => this._nudgeTemp(-STEP),
-      Delete: () => this._removeSelected(),
-      Backspace: () => this._removeSelected(),
+      ArrowLeft: () => this._setTime(day, mark, mark.minute - SNAP),
+      ArrowRight: () => this._setTime(day, mark, mark.minute + SNAP),
+      ArrowUp: () => this._setTemp(day, mark, mark.temperature + STEP),
+      ArrowDown: () => this._setTemp(day, mark, mark.temperature - STEP),
+      Delete: () => this._removeMark(day, mark),
+      Backspace: () => this._removeMark(day, mark),
     };
     if (!keys[ev.key]) return;
     ev.preventDefault();
     keys[ev.key]();
-    this._render();
-    const sel = this.shadowRoot.querySelector(".flag.selected");
-    if (sel) sel.focus({ preventScroll: true });
+    this._render(".flag.selected");
   }
 
   // -- rendering ---------------------------------------------------------
@@ -438,8 +470,7 @@ class MultisplitScheduleCard extends HTMLElement {
         level = i > 0 && m.minute - marks[i - 1].minute < near ? 1 - level : 0;
         return `<button class="flag${on ? " selected" : ""}${level ? " low" : ""}" data-index="${i}"
           style="left:${(m.minute / DAY) * 100}%"
-          aria-label="${DAY_LONG[day]} ${hhmm(m.minute)}, ${fmt(m.temperature)} degrees"
-          ${this._canEdit() ? "" : 'tabindex="-1"'}>
+          aria-label="${DAY_LONG[day]} ${hhmm(m.minute)}, ${fmt(m.temperature)} degrees">
           <span class="pin" style="background:${tempColour(m.temperature, lo, hi)}"></span>
           <span class="tag">${fmt(m.temperature)}°</span></button>`;
       })
@@ -453,6 +484,8 @@ class MultisplitScheduleCard extends HTMLElement {
   _renderRow(day) {
     const track = this.shadowRoot.querySelector(`.track[data-day="${day}"]`);
     if (track) track.innerHTML = this._rowContent(day);
+    const label = this.shadowRoot.querySelector(`.day[data-day="${day}"]`);
+    if (label) label.classList.toggle("changed", this._dirty.has(day));
   }
 
   _status(a) {
@@ -476,18 +509,113 @@ class MultisplitScheduleCard extends HTMLElement {
     }
   }
 
-  _render() {
+  /* The open day as a list: the way to edit on a phone, and a precise one
+   * anywhere. Times are typed (or picked), temperatures stepped. */
+  _panel() {
+    const d = this._openDay;
+    if (d === null) return "";
+    const { lo, hi } = this._limits();
+    const editable = this._canEdit();
+    const marks = this._week[d];
+    const sel = this._selected;
+    const carried = carriedInto(this._week, d);
+    const fromMidnight =
+      carried !== null && (!marks.length || marks[0].minute > 0)
+        ? `<p class="carried">From midnight ${fmt(carried)}°, carried over from the day before.</p>`
+        : "";
+    const rows = marks
+      .map((m, i) => {
+        const on = sel && sel.mark === m ? " selected" : "";
+        if (!editable)
+          return `<li class="mark${on}" data-index="${i}"><span class="at">${hhmm(m.minute)}</span>
+            <span class="value">${fmt(m.temperature)}°</span></li>`;
+        return `<li class="mark${on}" data-index="${i}">
+          <input type="time" class="time" step="900" value="${hhmm(m.minute)}" aria-label="Time of the ${hhmm(m.minute)} mark">
+          <div class="temp">
+            <button class="down" aria-label="Cooler" ${m.temperature <= lo ? "disabled" : ""}>−</button>
+            <span class="value">${fmt(m.temperature)}°</span>
+            <button class="up" aria-label="Warmer" ${m.temperature >= hi ? "disabled" : ""}>+</button>
+          </div>
+          <button class="remove" aria-label="Remove the ${hhmm(m.minute)} mark" title="Remove">×</button>
+        </li>`;
+      })
+      .join("");
+    const none = marks.length
+      ? ""
+      : `<p class="carried">${
+          editable ? "No marks on this day. Add one to change the temperature from a set time." : "No marks on this day."
+        }</p>`;
+    return `<div class="editor panel" role="region" aria-label="${DAY_LONG[d]}">
+      <div class="panel-head">
+        <button class="nav prev" aria-label="Previous day">‹</button>
+        <h3>${DAY_LONG[d]}</h3>
+        <button class="nav next" aria-label="Next day">›</button>
+        <button class="done">Done</button>
+      </div>
+      ${fromMidnight}
+      ${rows ? `<ul class="marks">${rows}</ul>` : ""}
+      ${none}
+      ${
+        editable
+          ? `<div class="panel-foot">
+              <button class="add">Add mark</button>
+              ${
+                marks.length
+                  ? `<span class="copy">Copy ${DAY_LONG[d]} to
+                      <button data-copy="weekdays">weekdays</button>
+                      <button data-copy="weekend">weekend</button>
+                      <button data-copy="all">every day</button></span>`
+                  : ""
+              }
+            </div>`
+          : `<p class="carried">Only ${this._whoMayEdit()} can change this schedule.</p>`
+      }
+    </div>`;
+  }
+
+  _footer() {
+    const { lo, hi, block, fallback } = this._limits();
+    const editable = this._canEdit();
+    const found = problems(this._week, lo, hi, block);
+    const empty = this._week.every((d) => !d.length);
+    const how = this._touchFirst()
+      ? "Tap a day to see and change its marks."
+      : "Click a line to add a mark and drag a mark to move it, or click a day's name to edit it as a list.";
+    const hint = editable
+      ? `${empty ? `No schedule yet, so this room follows the default ${fmt(fallback)}°. ` : ""}${how}`
+      : `Only ${this._whoMayEdit()} can change this schedule. Tap a day to see its marks.`;
+    const messages = [
+      ...found.map((p) => `<li>${p}</li>`),
+      this._error ? `<li>${esc(this._error)}</li>` : "",
+    ].join("");
+    return `<p class="hint">${this._openDay === null ? hint : ""}</p>
+      ${messages ? `<ul class="problems">${messages}</ul>` : ""}
+      ${
+        this._dirty.size && editable
+          ? `<div class="actions">
+              <button class="discard">Discard changes</button>
+              <button class="save" ${found.length || this._saving ? "disabled" : ""}>${this._saving ? "Saving…" : "Save schedule"}</button>
+            </div>`
+          : ""
+      }`;
+  }
+
+  _renderFooter() {
+    const foot = this.shadowRoot.querySelector(".footer");
+    if (!foot) return;
+    foot.innerHTML = this._footer();
+    this._bindFooter();
+  }
+
+  _render(focus) {
     const a = this._attrs();
     const state = this._hass.states[this._room];
     const name = (state && state.attributes.friendly_name) || this._room;
     const { lo, hi, block } = this._limits();
     const editable = this._canEdit();
     const rooms = this._rooms();
-    const found = problems(this._week, lo, hi, block);
     const awayId = this._awaySwitch();
     const away = awayId && this._hass.states[awayId].state === "on";
-    const empty = this._week.every((d) => !d.length);
-    const sel = this._selected;
 
     const tabs =
       rooms.length > 1
@@ -506,40 +634,12 @@ class MultisplitScheduleCard extends HTMLElement {
       .join("");
 
     const rows = DAYS.map(
-      (_, d) => `<div class="row">
-        <span class="day${this._dirty.has(d) ? " changed" : ""}" title="${DAY_LONG[d]}">${DAY_SHORT[d]}</span>
+      (_, d) => `<div class="row${this._openDay === d ? " open" : ""}">
+        <button class="day${this._dirty.has(d) ? " changed" : ""}" data-day="${d}"
+          aria-label="${DAY_LONG[d]}: show as a list" aria-expanded="${this._openDay === d}">${DAY_SHORT[d]}</button>
         <div class="track${editable ? " editable" : ""}" data-day="${d}">${this._rowContent(d)}</div>
       </div>`
     ).join("");
-
-    const editor =
-      sel && editable
-        ? `<div class="editor">
-            <span class="when">${DAY_LONG[sel.day]}</span>
-            <input type="time" class="time" step="900" value="${hhmm(sel.mark.minute)}" aria-label="Time">
-            <div class="temp">
-              <button class="down" aria-label="Cooler" ${sel.mark.temperature <= lo ? "disabled" : ""}>−</button>
-              <span>${fmt(sel.mark.temperature)}°</span>
-              <button class="up" aria-label="Warmer" ${sel.mark.temperature >= hi ? "disabled" : ""}>+</button>
-            </div>
-            <button class="remove">Remove mark</button>
-            <span class="copy">Copy ${DAY_SHORT[sel.day]} to
-              <button data-copy="weekdays">weekdays</button>
-              <button data-copy="weekend">weekend</button>
-              <button data-copy="all">every day</button></span>
-          </div>`
-        : "";
-
-    const hint = editable
-      ? empty
-        ? `No schedule yet, so this room follows the default ${fmt(this._limits().fallback)}°. Tap a day to drop the first mark.`
-        : "Tap a day to add a mark. Drag a mark to move it, or tap it to change it."
-      : `Only ${this._whoMayEdit()} can change this schedule.`;
-
-    const messages = [
-      ...found.map((p) => `<li>${p}</li>`),
-      this._error ? `<li>${esc(this._error)}</li>` : "",
-    ].join("");
 
     this.shadowRoot.innerHTML = `${STYLE}<ha-card>
       ${tabs}
@@ -564,19 +664,14 @@ class MultisplitScheduleCard extends HTMLElement {
         <div class="row axis"><span></span><div class="hours">${hours}</div></div>
         ${rows}
       </div>
-      ${editor}
-      <p class="hint">${hint}</p>
-      ${messages ? `<ul class="problems">${messages}</ul>` : ""}
-      ${
-        this._dirty.size && editable
-          ? `<div class="actions">
-              <button class="discard">Discard changes</button>
-              <button class="save" ${found.length || this._saving ? "disabled" : ""}>${this._saving ? "Saving…" : "Save schedule"}</button>
-            </div>`
-          : ""
-      }
+      ${this._panel()}
+      <div class="footer">${this._footer()}</div>
     </ha-card>`;
     this._bind();
+    if (focus) {
+      const el = this.shadowRoot.querySelector(focus);
+      if (el) el.focus({ preventScroll: true });
+    }
   }
 
   _bind() {
@@ -593,6 +688,14 @@ class MultisplitScheduleCard extends HTMLElement {
         this._render();
       })
     );
+    root.querySelectorAll(".day").forEach((b) =>
+      b.addEventListener("click", () => {
+        const d = Number(b.dataset.day);
+        if (this._openDay === d) this._openDay = null;
+        else this._openDayList(d);
+        this._render(`.day[data-day="${d}"]`);
+      })
+    );
     root.querySelectorAll(".track").forEach((t) => {
       const day = Number(t.dataset.day);
       t.addEventListener("pointerdown", (ev) => this._onTrackDown(ev, day));
@@ -601,38 +704,112 @@ class MultisplitScheduleCard extends HTMLElement {
         if (flag) this._onFlagKey(ev, day, Number(flag.dataset.index));
       });
     });
-    const on = (sel, fn) => {
-      const el = root.querySelector(sel);
-      if (el) el.addEventListener("click", fn);
+    on(root, ".away", () => this._toggleAway());
+    this._bindPanel();
+    this._bindFooter();
+  }
+
+  _bindPanel() {
+    const root = this.shadowRoot;
+    const d = this._openDay;
+    if (d === null) return;
+    const step = (by) => () => {
+      this._openDayList((d + by + 7) % 7);
+      this._render(by < 0 ? ".panel .prev" : ".panel .next");
     };
-    on(".up", () => this._nudgeTemp(STEP));
-    on(".down", () => this._nudgeTemp(-STEP));
-    on(".remove", () => this._removeSelected());
-    on(".discard", () => this._discard());
-    on(".save", () => this._save());
-    on(".away", () => this._toggleAway());
-    const time = root.querySelector(".time");
-    if (time)
-      time.addEventListener("change", () => {
-        if (time.value) this._moveSelected(toMinute(time.value));
-        this._render();
-      });
-    root.querySelectorAll("[data-copy]").forEach((b) =>
+    on(root, ".panel .prev", step(-1));
+    on(root, ".panel .next", step(1));
+    on(root, ".panel .done", () => {
+      this._openDay = null;
+      this._selected = null;
+      this._render(`.day[data-day="${d}"]`);
+    });
+    on(root, ".panel .add", () => {
+      const mark = this._addToDay(d);
+      if (!mark) this._error = `${DAY_LONG[d]} has no free time left for another mark.`;
+      this._render(".panel .add");
+    });
+    root.querySelectorAll(".panel [data-copy]").forEach((b) =>
       b.addEventListener("click", () => {
         const sets = { weekdays: [0, 1, 2, 3, 4], weekend: [5, 6], all: [0, 1, 2, 3, 4, 5, 6] };
-        this._copyDay(this._selected.day, sets[b.dataset.copy]);
+        this._copyDay(d, sets[b.dataset.copy]);
+        this._render(`.panel [data-copy="${b.dataset.copy}"]`);
       })
     );
+    root.querySelectorAll(".panel li.mark").forEach((li) => {
+      const mark = this._week[d][Number(li.dataset.index)];
+      li._mark = mark;
+      const where = () => `.panel li[data-index="${this._week[d].indexOf(mark)}"]`;
+      li.querySelector(".up")?.addEventListener("click", () => {
+        this._selected = { day: d, mark };
+        this._setTemp(d, mark, mark.temperature + STEP);
+        this._render(`${where()} .up`);
+      });
+      li.querySelector(".down")?.addEventListener("click", () => {
+        this._selected = { day: d, mark };
+        this._setTemp(d, mark, mark.temperature - STEP);
+        this._render(`${where()} .down`);
+      });
+      li.querySelector(".remove")?.addEventListener("click", () => {
+        this._removeMark(d, mark);
+        this._render(".panel .add");
+      });
+      const time = li.querySelector(".time");
+      if (!time) return;
+      // Applied as it changes so the line and the problems keep up, but the
+      // list is only redrawn (and re-sorted) when the field is left: a
+      // desktop browser reports each half of 06:30 as it is typed.
+      time.addEventListener("change", () => {
+        if (!time.value) return;
+        this._selected = { day: d, mark };
+        if (!this._setTime(d, mark, toMinute(time.value))) return this._renderFooter();
+        this._renderRow(d);
+        this._renderFooter();
+      });
+      time.addEventListener("blur", () => {
+        if (this._drag) return;
+        // Redraw to re-sort the list, keeping focus wherever it went next.
+        requestAnimationFrame(() => {
+          const active = this.shadowRoot.activeElement;
+          if (active === time) return;
+          this._render(this._selectorFor(active, d));
+        });
+      });
+    });
+  }
+
+  /* A selector for a focused element that survives a redraw: rows are found
+   * by their mark, which may have moved when the list was re-sorted. */
+  _selectorFor(el, day) {
+    if (!el || !el.closest || !el.closest(".panel")) return null;
+    const li = el.closest("li.mark");
+    const cls = [...el.classList][0];
+    if (!cls) return null;
+    if (!li) return `.panel .${cls}`;
+    const mark = li._mark;
+    const index = mark ? this._week[day].indexOf(mark) : -1;
+    return index < 0 ? null : `.panel li[data-index="${index}"] .${cls}`;
+  }
+
+  _bindFooter() {
+    const root = this.shadowRoot;
+    on(root, ".discard", () => this._discard());
+    on(root, ".save", () => this._save());
   }
 }
 
+function on(root, selector, fn) {
+  const el = root.querySelector(selector);
+  if (el) el.addEventListener("click", fn);
+}
+
 const STYLE = `<style>
-  :host { display: block; }
-  ha-card { padding: 16px; overflow: hidden; }
+  :host { display: block; -webkit-tap-highlight-color: transparent; }
+  ha-card { padding: 16px; overflow: hidden; container-type: inline-size; }
   .empty { color: var(--secondary-text-color); }
   .rooms { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 14px; }
   .room {
-    font: inherit; font-size: 0.9em; padding: 5px 12px; border-radius: 16px; cursor: pointer;
+    font: inherit; font-size: 0.9em; padding: 6px 12px; border-radius: 16px; cursor: pointer;
     border: 1px solid var(--divider-color); background: none; color: var(--primary-text-color);
   }
   .room.on { background: var(--primary-color); border-color: var(--primary-color); color: var(--text-primary-color, #fff); }
@@ -641,7 +818,7 @@ const STYLE = `<style>
   .status { margin: 4px 0 0; color: var(--primary-text-color); }
   .rails { margin: 2px 0 0; color: var(--secondary-text-color); font-size: 0.88em; }
   .away {
-    font: inherit; font-size: 0.9em; padding: 6px 12px; border-radius: 8px; cursor: pointer; white-space: nowrap;
+    font: inherit; font-size: 0.9em; padding: 8px 12px; border-radius: 8px; cursor: pointer; white-space: nowrap;
     border: 1px solid var(--divider-color); background: none; color: var(--primary-text-color);
   }
   .away.on { background: rgb(74, 111, 165); border-color: rgb(74, 111, 165); color: #fff; }
@@ -650,65 +827,110 @@ const STYLE = `<style>
     background: color-mix(in srgb, rgb(74, 111, 165) 14%, transparent); color: var(--primary-text-color);
   }
   .grid { margin-top: 14px; }
-  .row { display: grid; grid-template-columns: 40px 1fr; align-items: end; gap: 8px; }
+  .row { display: grid; grid-template-columns: 44px 1fr; align-items: end; gap: 6px; }
   .row + .row { margin-top: 2px; }
-  .day { font-size: 0.9em; color: var(--secondary-text-color); padding-bottom: 3px; }
+  .day {
+    font: inherit; font-size: 0.9em; text-align: left; color: var(--secondary-text-color);
+    background: none; border: 0; border-radius: 6px; padding: 6px 4px; cursor: pointer; min-height: 32px;
+  }
+  .row.open .day { color: var(--primary-color); font-weight: 600; }
   .day.changed { color: var(--primary-text-color); font-weight: 600; }
   .day.changed::after { content: "•"; color: var(--primary-color); margin-left: 2px; }
   .hours { position: relative; height: 14px; font-size: 0.72em; color: var(--secondary-text-color); }
   .hours span { position: absolute; transform: translateX(-50%); }
   .hours span:first-child { transform: none; }
   .hours span:last-child { transform: translateX(-100%); }
-  .track { position: relative; height: 50px; touch-action: none; user-select: none; -webkit-user-select: none; }
-  .track.editable { cursor: copy; }
-  .seg { position: absolute; bottom: 0; height: 12px; }
+  .track { position: relative; height: 50px; touch-action: pan-y; user-select: none; -webkit-user-select: none; cursor: pointer; }
+  @media (hover: hover) { .track.editable { cursor: copy; } }
+  .seg { position: absolute; bottom: 0; height: 12px; pointer-events: none; }
   .seg.first { border-top-left-radius: 6px; border-bottom-left-radius: 6px; }
   .seg.last { border-top-right-radius: 6px; border-bottom-right-radius: 6px; }
   .seg.unset { opacity: 0.35; }
-  .now { position: absolute; bottom: -3px; height: 18px; width: 2px; margin-left: -1px; background: var(--primary-text-color); border-radius: 1px; }
+  .now { position: absolute; bottom: -3px; height: 18px; width: 2px; margin-left: -1px; background: var(--primary-text-color); border-radius: 1px; pointer-events: none; }
+  /* A finger-wide hit area around a 2px pin. */
   .flag {
-    position: absolute; bottom: 0; transform: translateX(-1px); padding: 0; border: 0; background: none;
-    font: inherit; color: var(--primary-text-color); cursor: grab; height: 50px; width: 2px;
+    position: absolute; bottom: 0; transform: translateX(-14px); padding: 0; border: 0; background: none;
+    font: inherit; color: var(--primary-text-color); cursor: pointer; height: 50px; width: 28px;
+  }
+  .track.editable .flag { cursor: grab; }
+  .flag .pin { position: absolute; left: 13px; bottom: 0; width: 2px; height: 40px; border-radius: 1px; }
+  .flag .tag {
+    position: absolute; left: 14px; top: 0; padding: 0 5px; line-height: 16px; font-size: 0.78em; white-space: nowrap;
+    border-radius: 0 6px 6px 0; background: var(--card-background-color); border: 1px solid var(--divider-color); border-left: 0;
   }
   .flag.low .pin { height: 22px; }
   .flag.low .tag { top: 17px; }
-  .track:not(.editable) .flag { cursor: default; }
-  .flag .pin { position: absolute; left: 0; bottom: 0; width: 2px; height: 40px; border-radius: 1px; }
-  .flag .tag {
-    position: absolute; left: 0; top: 0; padding: 0 5px; line-height: 16px; font-size: 0.78em; white-space: nowrap;
-    border-radius: 0 6px 6px 0; background: var(--card-background-color); border: 1px solid var(--divider-color); border-left: 0;
-  }
   .flag.selected .tag, .flag:focus-visible .tag { border-color: var(--primary-color); color: var(--primary-color); font-weight: 600; }
   .flag:focus { outline: none; }
   .flag:focus-visible .pin { box-shadow: 0 0 0 2px var(--primary-color); }
   .editor {
-    display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; margin-top: 14px; padding: 10px 12px;
-    border-radius: 8px; background: var(--secondary-background-color);
+    margin-top: 12px; padding: 4px 12px 12px; border-radius: 10px; background: var(--secondary-background-color);
   }
-  .when { font-weight: 500; }
-  .time { font: inherit; color: inherit; background: var(--card-background-color); border: 1px solid var(--divider-color); border-radius: 6px; padding: 3px 6px; }
-  .temp { display: inline-flex; align-items: center; gap: 6px; }
-  .temp span { min-width: 3.2em; text-align: center; font-weight: 600; font-variant-numeric: tabular-nums; }
-  .temp button { font: inherit; width: 30px; height: 30px; border-radius: 50%; border: 1px solid var(--divider-color); background: var(--card-background-color); color: inherit; cursor: pointer; }
+  .panel-head { display: flex; align-items: center; gap: 4px; min-height: 48px; }
+  .panel-head h3 { margin: 0 4px; font-size: 1.05em; font-weight: 600; flex: 1; }
+  .panel-head h3 { order: 1; }
+  .nav {
+    order: 0; font: inherit; font-size: 1.4em; line-height: 1; width: 40px; height: 40px; border-radius: 50%;
+    border: 0; background: none; color: var(--primary-text-color); cursor: pointer;
+  }
+  .nav.next { order: 2; }
+  .done {
+    order: 3; font: inherit; font-weight: 500; padding: 8px 14px; border-radius: 8px; border: 0; cursor: pointer;
+    background: var(--card-background-color); color: var(--primary-color);
+  }
+  .carried { margin: 4px 0 6px; color: var(--secondary-text-color); font-size: 0.9em; }
+  .marks { list-style: none; margin: 0; padding: 0; }
+  .mark {
+    display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 12px;
+    min-height: 52px; border-bottom: 1px solid var(--divider-color);
+  }
+  .mark:last-child { border-bottom: 0; }
+  .mark.selected { box-shadow: inset 3px 0 0 var(--primary-color); padding-left: 8px; }
+  .mark .at { font-variant-numeric: tabular-nums; }
+  /* 16px stops iOS zooming the page when the field is focused. */
+  .time {
+    font: inherit; font-size: 16px; color: inherit; background: var(--card-background-color);
+    border: 1px solid var(--divider-color); border-radius: 8px; padding: 8px 10px; min-height: 40px;
+  }
+  .temp { display: inline-flex; align-items: center; gap: 4px; justify-self: center; min-width: 0; }
+  .value { min-width: 3.4em; text-align: center; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .temp button {
+    font: inherit; font-size: 1.15em; width: 40px; height: 40px; border-radius: 50%; cursor: pointer;
+    border: 1px solid var(--divider-color); background: var(--card-background-color); color: inherit;
+  }
   .temp button:disabled { opacity: 0.4; cursor: default; }
-  .remove, .copy button, .discard {
-    font: inherit; background: none; border: 0; padding: 2px 0; cursor: pointer; color: var(--primary-color);
+  .remove {
+    font: inherit; font-size: 1.4em; line-height: 1; width: 40px; height: 40px; border-radius: 50%; border: 0;
+    background: none; cursor: pointer; color: var(--error-color, #db4437);
   }
-  .remove { color: var(--error-color, #db4437); }
+  .copy button, .discard, .add {
+    font: inherit; background: none; border: 0; padding: 8px 4px; cursor: pointer; color: var(--primary-color); min-height: 40px;
+  }
+  .panel-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 16px; margin-top: 6px; }
+  .add { font-weight: 600; }
   .copy { color: var(--secondary-text-color); font-size: 0.92em; }
-  .copy button { margin-left: 6px; }
+  .copy button { margin-left: 4px; }
   .hint { margin: 12px 0 0; color: var(--secondary-text-color); font-size: 0.88em; }
+  .hint:empty { display: none; }
   .problems { margin: 8px 0 0; padding-left: 18px; color: var(--error-color, #db4437); font-size: 0.9em; }
   .actions { display: flex; justify-content: flex-end; align-items: center; gap: 16px; margin-top: 12px; }
   .save {
-    font: inherit; padding: 8px 16px; border-radius: 8px; border: 0; cursor: pointer;
+    font: inherit; padding: 10px 18px; border-radius: 8px; border: 0; cursor: pointer;
     background: var(--primary-color); color: var(--text-primary-color, #fff);
   }
   .save:disabled { opacity: 0.45; cursor: default; }
-  button:focus-visible { outline: 2px solid var(--primary-color); outline-offset: 2px; }
-  @media (max-width: 420px) {
-    .row { grid-template-columns: 32px 1fr; }
+  button:focus-visible, .time:focus-visible { outline: 2px solid var(--primary-color); outline-offset: 2px; }
+  /* Narrow: the lines become an overview. Labels would collide, so only the
+   * picked mark keeps one, and the day opens as a list to edit. */
+  @container (max-width: 480px) {
+    .row { grid-template-columns: 38px 1fr; }
+    .track { height: 34px; }
+    .flag { height: 34px; }
+    .flag .pin, .flag.low .pin { height: 24px; }
+    .flag:not(.selected) .tag { display: none; }
+    .flag .tag, .flag.low .tag { top: 0; }
     .copy { flex-basis: 100%; }
+    .mark { gap: 8px; }
   }
 </style>`;
 

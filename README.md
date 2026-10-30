@@ -133,11 +133,19 @@ type: custom:multisplit-schedule-card
 
 It shows one line per day, Monday to Sunday. A mark on a line sets the room's
 target from that time until the next mark, across midnight and round the week
-— a single mark on Monday at 07:00 means that temperature all week. Tap a line
-to drop a mark, drag it to move it (in 15-minute steps), tap it to change the
-temperature or remove it, and copy a day to the weekdays, the weekend or every
-day. Changes are saved with **Save schedule**; arrow keys move a focused mark
-and change its temperature, and Delete removes it.
+— a single mark on Monday at 07:00 means that temperature all week.
+
+- **On a phone**, the lines are an overview: tap a day to open it as a list,
+  where each mark has a time field, − and + for the temperature, and × to
+  remove it, with *Add mark*, ‹ › to step through the week, and copy to the
+  weekdays, the weekend or every day. Swiping over the card scrolls the page
+  and never adds a mark.
+- **With a mouse**, click a line to drop a mark there, drag a mark to move it
+  (in 15-minute steps), or click a day's name for the same list.
+- **With a keyboard**, a focused mark moves with ← →, changes temperature with
+  ↑ ↓, opens its day with Enter, and is removed with Delete.
+
+Changes are kept until **Save schedule**; *Discard changes* drops them.
 
 **Who may edit.** A room's owners may edit that room; administrators may edit
 every room. A room with no owner is admins-only, and everyone else sees the

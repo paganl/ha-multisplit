@@ -66,6 +66,15 @@ a real install):
   from 252 and 333 minutes to 28 and 22 (their normal rest periods).
   `stale_after_minutes` now applies only to separate room sensors.
 - A stale room no longer carries a "banking solar" note it was not acting on.
+- **The schedule card works on a phone.** Tapping a day opens it as a list
+  — a time field, − and + for the temperature and × to remove each mark, *Add
+  mark*, ‹ › through the week, and copy to other days — so nothing has to be
+  dragged with a finger. A swipe over the card scrolls the page instead of
+  dropping a mark: nothing happens until a press ends, and only a tap acts.
+  Marks have a finger-wide touch area, and on a narrow card only the picked
+  mark keeps its label so labels no longer collide. With a mouse, clicking a
+  line still drops a mark and dragging still moves one; a day's name opens
+  the list on any device.
 - **A room may have several owners** (`owner: [Paul, Anna]`), so a shared
   bedroom can be edited by both people in it. A single name still works. The
   room entity's attribute is now `owners`, a list; the card reads either.
