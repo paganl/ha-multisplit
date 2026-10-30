@@ -34,6 +34,7 @@ from .core.schedule import (
     ScheduleError,
     WeekSchedule,
     check as check_schedule,
+    who_may_edit,
     may_edit,
     target_problem,
 )
@@ -328,14 +329,14 @@ class MultisplitCoordinator(DataUpdateCoordinator[Plan]):
             else None
         )
         if not may_edit(
-            spec.owner,
+            spec.owners,
             user_id=context.user_id if context else None,
             user_name=user.name if user else None,
             is_admin=bool(user and user.is_admin),
         ):
             raise ServiceValidationError(
                 f"{spec.name}'s schedule can only be changed by "
-                f"{spec.owner + ' or ' if spec.owner else ''}an administrator"
+                f"{who_may_edit(spec.owners)}"
             )
         current = self.schedules.get(room, WeekSchedule())
         try:

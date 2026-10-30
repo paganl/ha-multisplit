@@ -257,23 +257,34 @@ def target_problem(target: float, rails: Guardrails) -> str | None:
 
 
 def may_edit(
-    owner: str | None, *, user_id: str | None, user_name: str | None, is_admin: bool
+    owners: Sequence[str] | str | None,
+    *,
+    user_id: str | None,
+    user_name: str | None,
+    is_admin: bool,
 ) -> bool:
     """Whether this person may change this room's schedule.
 
-    Admins may edit any room. A room's owner -- named in configuration by
-    Home Assistant user name or user id -- may edit their own. A room with
-    no owner is admins-only. A call with no user at all comes from Home
+    Admins may edit any room. A room's owners -- one or more, each named in
+    configuration by Home Assistant user name or user id -- may edit it too,
+    so a shared bedroom can belong to both people in it. A room with no
+    owner is admins-only. A call with no user at all comes from Home
     Assistant itself (an automation or script an admin wrote) and is allowed.
     """
     if user_id is None:
         return True
     if is_admin:
         return True
-    if owner is None:
-        return False
-    wanted = owner.strip().casefold()
-    return wanted in {user_id.casefold(), (user_name or "").strip().casefold()}
+    if isinstance(owners, str):
+        owners = [owners]
+    wanted = {o.strip().casefold() for o in owners or () if o and o.strip()}
+    return bool(wanted & {user_id.casefold(), (user_name or "").strip().casefold()})
+
+
+def who_may_edit(owners: Sequence[str]) -> str:
+    """'an administrator', 'Erin or an administrator', 'Paul, Anna or an administrator'."""
+    names = [*owners, "an administrator"]
+    return names[0] if len(names) == 1 else ", ".join(names[:-1]) + " or " + names[-1]
 
 
 def choose_target(

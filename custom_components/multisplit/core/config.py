@@ -84,7 +84,7 @@ class RoomSpec:
     band: float | None  # None = use the default
     #: Who may edit this room's schedule besides admins: a Home Assistant
     #: user name or user id. None means admins only.
-    owner: str | None = None
+    owners: tuple[str, ...] = ()
     #: The range every target for this room must sit in -- schedule marks
     #: and thermostat overrides alike. Defaults to the group's setpoint range.
     min_target: float = 15.0
@@ -576,10 +576,24 @@ def load(raw: object) -> SystemConfig:
             reader.fail(where, f"'schedule_entity' should look like schedule.something, found {schedule!r}")
             schedule = None
 
+        # One owner or several: `owner: Erin`, or `owner: [Paul, Anna]` for a
+        # shared room.
         owner = body.get("owner")
-        if owner is not None and (not isinstance(owner, str) or not owner.strip()):
-            reader.fail(where, f"'owner' must be a Home Assistant user name or id, found {owner!r}")
-            owner = None
+        names = [owner] if isinstance(owner, str) else owner
+        owners: tuple[str, ...] = ()
+        if owner is not None:
+            if (
+                not isinstance(names, (list, tuple))
+                or not names
+                or any(not isinstance(n, str) or not n.strip() for n in names)
+            ):
+                reader.fail(
+                    where,
+                    "'owner' must be a Home Assistant user name or id, or a list of "
+                    f"them, found {owner!r}",
+                )
+            else:
+                owners = tuple(dict.fromkeys(n.strip() for n in names))
 
         # The room's range: configuration, not the owner's to change. Every
         # target the room can be given must fit, including the shared default
@@ -625,7 +639,7 @@ def load(raw: object) -> SystemConfig:
                 priority=priority,
                 schedule_entity=schedule,
                 band=band,
-                owner=owner.strip() if owner else None,
+                owners=owners,
                 min_target=min_target,
                 max_target=max_target,
             )

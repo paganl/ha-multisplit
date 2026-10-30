@@ -201,9 +201,22 @@ class MultisplitScheduleCard extends HTMLElement {
     const a = this._attrs();
     const user = this._hass.user || {};
     if (user.is_admin) return true;
-    if (!a.owner) return false;
-    const owner = String(a.owner).trim().toLowerCase();
-    return owner === String(user.id || "").toLowerCase() || owner === String(user.name || "").trim().toLowerCase();
+    const me = [String(user.id || "").toLowerCase(), String(user.name || "").trim().toLowerCase()];
+    return this._owners().some((o) => me.includes(o.trim().toLowerCase()));
+  }
+
+  /* One or more owners; `owner` is the beta.1/2 attribute, kept for an
+   * integration not yet updated alongside the card. */
+  _owners() {
+    const a = this._attrs();
+    const raw = a.owners ?? a.owner ?? [];
+    return (Array.isArray(raw) ? raw : [raw]).filter((o) => o && String(o).trim());
+  }
+
+  /* "an administrator", "Erin or an administrator", "Paul, Anna or an administrator" */
+  _whoMayEdit() {
+    const names = [...this._owners().map(esc), "an administrator"];
+    return names.length === 1 ? names[0] : `${names.slice(0, -1).join(", ")} or ${names[names.length - 1]}`;
   }
 
   _limits() {
@@ -521,7 +534,7 @@ class MultisplitScheduleCard extends HTMLElement {
       ? empty
         ? `No schedule yet, so this room follows the default ${fmt(this._limits().fallback)}°. Tap a day to drop the first mark.`
         : "Tap a day to add a mark. Drag a mark to move it, or tap it to change it."
-      : `Only ${a.owner ? `${esc(a.owner)} or ` : ""}an administrator can change this schedule.`;
+      : `Only ${this._whoMayEdit()} can change this schedule.`;
 
     const messages = [
       ...found.map((p) => `<li>${p}</li>`),
@@ -534,7 +547,11 @@ class MultisplitScheduleCard extends HTMLElement {
         <div>
           <h2>${esc(name)}</h2>
           <p class="status">${state ? this._status(a) : "Unavailable"}</p>
-          <p class="rails">Allowed ${fmt(lo)}–${fmt(hi)}°. Each setting at least ${block} min.${a.owner ? ` Owner: ${esc(a.owner)}.` : ""}</p>
+          <p class="rails">Allowed ${fmt(lo)}–${fmt(hi)}°. Each setting at least ${block} min.${
+            this._owners().length
+              ? ` ${this._owners().length > 1 ? "Owners" : "Owner"}: ${this._owners().map(esc).join(", ")}.`
+              : ""
+          }</p>
         </div>
         ${
           awayId

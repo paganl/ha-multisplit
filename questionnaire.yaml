@@ -256,8 +256,8 @@ sections:
           inherits that bias.
 
           Optional per room: `owner`, the Home Assistant user (name or id) who
-          may edit the room's schedule besides admins -- without one, only
-          admins can; and `min_target` / `max_target`, the range every target
+          may edit the room's schedule besides admins, or a list of them for a
+          shared room (`owner: [Paul, Anna]`) -- without one, only admins can; and `min_target` / `max_target`, the range every target
           for the room must sit in, schedule and thermostat alike -- without
           them, the group's setpoint range.
         type: records

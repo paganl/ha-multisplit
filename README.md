@@ -139,9 +139,20 @@ temperature or remove it, and copy a day to the weekdays, the weekend or every
 day. Changes are saved with **Save schedule**; arrow keys move a focused mark
 and change its temperature, and Delete removes it.
 
-**Who may edit.** A room's `owner` (a Home Assistant user name or id, set per
-room in the questionnaire) may edit that room; administrators may edit every
-room. A room with no owner is admins-only. Others see the schedule read-only.
+**Who may edit.** A room's owners may edit that room; administrators may edit
+every room. A room with no owner is admins-only, and everyone else sees the
+schedule read-only. Owners are set per room in the questionnaire's rooms list —
+in Home Assistant, Configure → *Outdoor units and rooms* — as a Home Assistant
+user name or id, or a list for a shared room:
+
+```yaml
+- key: erin
+  # …
+  owner: Erin
+- key: bedroom
+  # …
+  owner: [Paul, Anna]
+```
 
 **Guardrails.** Every mark must sit inside the room's `min_target` and
 `max_target` (by default the group's setpoint range), and no setting may last

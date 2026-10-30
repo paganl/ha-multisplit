@@ -312,7 +312,7 @@ def test_only_keys_added_since_a_release_may_default():
 def test_a_room_without_settings_is_admin_only_within_the_group_range():
     config = load(GOOD)
     room = config.rooms[0]
-    assert room.owner is None
+    assert room.owners == ()
     assert (room.min_target, room.max_target) == config.groups[0].policy.setpoint_range
     assert config.guardrails(room.key).min_block.total_seconds() == 30 * 60
 
@@ -324,7 +324,26 @@ def test_a_room_can_name_its_owner_and_range():
     raw["rooms"]["erin"].update(owner="Erin", min_target=16, max_target=21)
     rails = load(raw).guardrails("erin")
     assert (rails.min_target, rails.max_target) == (16.0, 21.0)
-    assert next(r for r in load(raw).rooms if r.key == "erin").owner == "Erin"
+    assert next(r for r in load(raw).rooms if r.key == "erin").owners == ("Erin",)
+
+
+def test_a_shared_room_can_have_several_owners():
+    import copy
+
+    raw = copy.deepcopy(GOOD)
+    raw["rooms"]["bedroom"]["owner"] = ["Paul", "Anna", "Paul"]
+    room = next(r for r in load(raw).rooms if r.key == "bedroom")
+    assert room.owners == ("Paul", "Anna"), "duplicates dropped, order kept"
+
+
+@pytest.mark.parametrize("bad", ["", [], ["Erin", ""], 7, {"name": "Erin"}])
+def test_a_malformed_owner_is_rejected(bad):
+    import copy
+
+    raw = copy.deepcopy(GOOD)
+    raw["rooms"]["erin"]["owner"] = bad
+    with pytest.raises(ConfigError, match="owner"):
+        load(raw)
 
 
 def test_a_backwards_room_range_is_rejected():

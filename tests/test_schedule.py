@@ -153,11 +153,22 @@ def test_an_override_is_held_to_the_same_range():
         ("Erin", "u2", "Ischa", False, False),  # someone else's room
         ("Erin", "u3", "Paul", True, True),  # admins edit every room
         (None, "u2", "Ischa", False, False),  # no owner: admins only
+        (["Paul", "Anna"], "u4", "Anna", False, True),  # a shared room, either owner
+        (["Paul", "Anna"], "u2", "Ischa", False, False),  # but nobody else
+        ((), "u2", "Ischa", False, False),  # an empty list is admins only
         (None, None, None, False, True),  # Home Assistant itself
     ],
 )
 def test_owners_and_admins_may_edit(owner, user_id, user_name, is_admin, allowed):
     assert may_edit(owner, user_id=user_id, user_name=user_name, is_admin=is_admin) is allowed
+
+
+def test_owners_are_listed_for_the_refusal_message():
+    from core.schedule import who_may_edit
+
+    assert who_may_edit([]) == "an administrator"
+    assert who_may_edit(["Erin"]) == "Erin or an administrator"
+    assert who_may_edit(["Paul", "Anna"]) == "Paul, Anna or an administrator"
 
 
 def test_marks_sort_themselves():

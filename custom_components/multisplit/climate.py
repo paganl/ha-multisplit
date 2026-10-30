@@ -58,7 +58,7 @@ class RoomClimate(MultisplitRoomEntity, ClimateEntity):
         {
             "reason", "wants", "heat_to", "cool_to", "group", "group_mode", "group_reason",
             # What the schedule card reads. Worth having now, not as history.
-            "room", "owner", "min_target", "max_target", "min_block_minutes", "schedule",
+            "room", "owners", "min_target", "max_target", "min_block_minutes", "schedule",
             "target_source", "override_until", "next_schedule_change", "away",
             "default_target", "away_target",
         }
@@ -119,7 +119,7 @@ class RoomClimate(MultisplitRoomEntity, ClimateEntity):
         schedule = coordinator.schedules.get(self._room)
         return {
             "room": self._room,
-            "owner": spec.owner,
+            "owners": list(spec.owners),
             "min_target": spec.min_target,
             "max_target": spec.max_target,
             "min_block_minutes": int(coordinator.config.intent.min_block.total_seconds() // 60),

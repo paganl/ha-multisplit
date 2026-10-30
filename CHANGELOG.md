@@ -66,6 +66,9 @@ a real install):
   from 252 and 333 minutes to 28 and 22 (their normal rest periods).
   `stale_after_minutes` now applies only to separate room sensors.
 - A stale room no longer carries a "banking solar" note it was not acting on.
+- **A room may have several owners** (`owner: [Paul, Anna]`), so a shared
+  bedroom can be edited by both people in it. A single name still works. The
+  room entity's attribute is now `owners`, a list; the card reads either.
 
 **Fixed**
 
