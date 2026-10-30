@@ -654,8 +654,12 @@ def plan(
     nothing, vote for nothing and are given no command -- their unit is left
     alone -- unless they fall below ``frost``'s threshold, when they are
     heated like any other frost-protected room. When that protection ends,
-    such a room is commanded off once, undoing what frost protection did,
-    and is then left alone again.
+    such a room is commanded off, undoing what frost protection did, and
+    keeps being commanded off (``RoomRuntime.releasing``) until the caller
+    sees the unit off and drops that memory; then it is left alone again.
+
+    Every group gets a decision, even one whose rooms are all switched off,
+    so nothing downstream has to cope with a group missing from the plan.
     """
     by_group: dict[str, list[RoomConfig]] = {}
     for room in rooms:
@@ -689,11 +693,10 @@ def plan(
                 members.append(room)
                 continue
             was = runtime.get(room.room, RoomRuntime(room.room))
-            if was.frost:
-                # Protection has just ended for a room that is switched off:
-                # put its unit back the way it is meant to be, once. Its
-                # memory is not carried on, exactly as for any switched-off
-                # room.
+            if was.frost or was.releasing:
+                # Protection has ended for a room that is switched off: put
+                # its unit back the way it is meant to be. Repeated until the
+                # caller has seen it off -- see ``RoomRuntime.releasing``.
                 reading = measured(room.room).temperature
                 commands.append(
                     RoomCommand(
@@ -707,8 +710,12 @@ def plan(
                         ),
                     )
                 )
+                next_runtime.append(RoomRuntime(room.room, releasing=True))
 
         if not members:
+            decisions.append(
+                GroupDecision(group, None, "off — every room in this group is switched off")
+            )
             continue
 
         demands = {
@@ -792,6 +799,7 @@ def plan(
                     unserved_since=(was.unserved_since or now) if starved else None,
                     untrusted_since=None if trusted else (was.untrusted_since or now),
                     frost=demand.frost,
+                    releasing=False,
                 )
             )
 

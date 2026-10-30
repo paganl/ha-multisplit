@@ -505,8 +505,9 @@ sections:
           been switched off, has a stale sensor, or its heating is locked out
           by the weather or the season -- every one of which can otherwise
           leave a unit off while pipes freeze. It must sit below the away
-          target, or it would take over from the setback.
-        type: number
+          target, or it would take over from the setback. null on both this
+          and the next turns frost protection off.
+        type: number_or_null
         unit: °C
         target: defaults.intent.frost_below
         answer: 7.0
@@ -517,7 +518,7 @@ sections:
           not switched on and off with the sensor's noise. The unit is asked
           for its lowest setpoint and stopped here, because most units cannot
           be set this low.
-        type: number
+        type: number_or_null
         unit: °C
         target: defaults.intent.frost_release
         answer: 10.0

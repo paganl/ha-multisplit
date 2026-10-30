@@ -209,19 +209,48 @@ def test_a_switched_off_room_is_still_protected():
     assert erin.target == 16.0
 
 
-def test_a_switched_off_room_is_turned_off_once_when_protection_ends():
+def test_a_switched_off_room_keeps_being_turned_off_until_it_is():
+    """One write can be rate-limited or fail; nothing else would retry it."""
     released = run(
         {"erin": 10.5}, standby=frozenset({"erin"}), runtime={"erin": frost_runtime("erin")}
     )
     erin = released.room("erin")
     assert erin.mode is None
     assert "frost protection released at 10.5°" in erin.because
-    assert released.runtime == ()
+    (memory,) = released.runtime
+    assert memory.releasing and not memory.frost and not memory.running
 
-    after = run({"erin": 10.5}, standby=frozenset({"erin"}))
+    # Still releasing: the caller has not yet seen the unit off.
+    again = run({"erin": 11.0}, standby=frozenset({"erin"}), runtime={"erin": memory})
+    assert again.room("erin").mode is None
+    assert again.runtime[0].releasing
+
+    # The caller drops the memory once the unit is off; then it is left alone.
+    after = run({"erin": 11.0}, standby=frozenset({"erin"}))
     assert after.rooms == ()
 
 
-def test_a_whole_group_switched_off_has_no_decision():
+def test_a_room_switched_back_on_mid_release_is_simply_planned():
+    memory = RoomRuntime("erin", releasing=True)
+    result = run({"erin": 19.0}, runtime={"erin": memory})
+    assert not result.runtime[0].releasing
+
+
+def test_a_releasing_room_that_freezes_again_is_protected_again():
+    memory = RoomRuntime("erin", releasing=True)
+    result = run({"erin": 6.0}, standby=frozenset({"erin"}), runtime={"erin": memory})
+    assert result.room("erin").mode == HEAT and result.room("erin").frost
+    assert not result.runtime[0].releasing
+
+
+def test_a_whole_group_switched_off_still_has_a_decision():
+    """Downstream (the mode sensor, a room's attributes) reads its group."""
     result = run({"erin": 12.0}, standby=frozenset({"erin"}))
-    assert result.groups == () and result.rooms == ()
+    assert result.rooms == ()
+    assert result.group("a").mode is None
+    assert "switched off" in result.group("a").because
+
+    releasing = run(
+        {"erin": 10.5}, standby=frozenset({"erin"}), runtime={"erin": frost_runtime("erin")}
+    )
+    assert releasing.group("a").mode is None and releasing.room("erin").mode is None

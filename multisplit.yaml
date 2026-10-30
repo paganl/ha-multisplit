@@ -378,7 +378,8 @@ defaults:
     # been switched off, has a stale sensor, or its heating is locked out by
     # the weather or the season -- every one of which can otherwise leave a
     # unit off while pipes freeze. It must sit below the away target, or it
-    # would take over from the setback.
+    # would take over from the setback. null on both this and the next turns
+    # frost protection off.
     # Units: °C.
     frost_below: 7.0
     # Up to what temperature does frost protection keep heating?

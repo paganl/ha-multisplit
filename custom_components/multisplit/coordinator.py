@@ -197,7 +197,11 @@ class MultisplitCoordinator(DataUpdateCoordinator[Plan]):
             standby=frozenset(self.excluded),
         )
 
-        self._runtime = {runtime.room: runtime for runtime in plan.runtime}
+        self._runtime = {
+            runtime.room: runtime
+            for runtime in plan.runtime
+            if not (runtime.releasing and self._unit_is_off(runtime.room))
+        }
         for decision in plan.groups:
             previous = self._group_state.get(decision.group, GroupState(decision.group))
             if previous.mode != decision.mode:
@@ -431,6 +435,16 @@ class MultisplitCoordinator(DataUpdateCoordinator[Plan]):
     async def async_clear_override(self, room: str) -> None:
         self.overrides.pop(room, None)
         await self.async_request_refresh()
+
+    def _unit_is_off(self, room: str) -> bool:
+        """Whether a room's unit is seen off, or no longer exists at all.
+
+        Unavailable is not off: a unit that drops off the network mid-release
+        may come back still heating, so the off command keeps repeating.
+        """
+        spec = next(r for r in self.config.rooms if r.key == room)
+        state = self.hass.states.get(spec.climate_entity)
+        return state is None or state.state == "off"
 
     def is_excluded(self, room: str) -> bool:
         return room in self.excluded

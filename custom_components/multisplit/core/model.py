@@ -236,6 +236,11 @@ class RoomRuntime:
     unserved_since: datetime | None = None  # when demand first went unserved
     untrusted_since: datetime | None = None  # when its reading stopped being trustworthy
     frost: bool = False  # under frost protection, latched until it reaches release
+    #: A switched-off room released from frost protection whose unit has not
+    #: yet been seen off. Its off command repeats until it has been, because a
+    #: single write can be rate-limited or fail, and nothing else would retry
+    #: it for a room that is otherwise left alone.
+    releasing: bool = False
 
     def elapsed(self, now: datetime) -> timedelta:
         if self.since is None:

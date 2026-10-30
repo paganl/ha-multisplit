@@ -449,3 +449,14 @@ def test_frost_thresholds_that_could_not_work_are_refused(below, release, messag
     _intent(raw)["frost_release"] = release
     with pytest.raises(ConfigError, match=message):
         load(raw)
+
+
+def test_an_older_file_with_a_low_setback_still_loads():
+    """The away-target check is for thresholds the file sets itself."""
+    raw = _copy()
+    del _intent(raw)["frost_below"], _intent(raw)["frost_release"]
+    raw["defaults"]["policy"]["setpoint_range"] = [5.0, 26.0]
+    _intent(raw)["away_target"] = 6.0
+    for group in raw["groups"].values():
+        group.get("policy", {}).pop("setpoint_range", None)
+    assert load(raw).frost == FrostProtection(7.0, 10.0)

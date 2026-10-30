@@ -37,7 +37,8 @@ the planner gave every room the same 20°.
   gone stale, heating is locked out by the weather or the season, or another
   room on the same outdoor unit wants cool. The unit is asked for its lowest
   setpoint and stopped at the release threshold; other rooms still honour
-  their lockouts. A switched-off room is turned off again once released. Both
+  their lockouts. A switched-off room is turned off again once released, and
+  the off command repeats until the unit is seen off. Both
   thresholds are new questions in the questionnaire; a file without them
   loads with protection on and a notice saying so — the one default that is
   not "behave as before", because no floor is not a safe thing to have meant.

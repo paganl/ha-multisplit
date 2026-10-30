@@ -507,7 +507,13 @@ def load(raw: object) -> SystemConfig:
     )
     frost = _frost(reader, raw_intent, "defaults.intent")
     low, high = default_policy.setpoint_range
-    if frost is not None and frost.below >= intent.away_target:
+    # Only for thresholds the file sets itself: a file that loaded before
+    # frost protection existed must keep loading, whatever its setback.
+    if (
+        frost is not None
+        and "frost_below" in raw_intent
+        and frost.below >= intent.away_target
+    ):
         reader.fail(
             "defaults.intent",
             f"'frost_below' of {frost.below:g}° must be below the away target of "
