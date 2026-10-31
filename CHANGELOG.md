@@ -4,6 +4,16 @@
 
 **Added**
 
+- **A window icon on the schedule card.** When a room is standing aside
+  because a window or door is open, an open-window icon appears next to its
+  name and on its tab, so a glance at the card shows which rooms have a
+  window open without switching between them. Hover for what it means. The
+  rooms' thermostats carry a `window_open` attribute for it.
+
+## Unreleased
+
+**Added**
+
 - **Open windows stand a room aside.** A room may name a `lockout_sensor`:
   while it is on, the room votes for nothing, is not counted as unserved, its
   unit is commanded off, and its status reads *window open*; it rejoins on the
