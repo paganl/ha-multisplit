@@ -49,6 +49,7 @@ def record_for(
     surplus: bool = False,
     surplus_reading: bool | None = None,
     away: bool = False,
+    open_windows: frozenset[str] = frozenset(),
 ) -> dict:
     """One cycle, as a flat JSON-safe object.
 
@@ -57,7 +58,9 @@ def record_for(
     exactly. The commanded ``target`` alone cannot: it is already moved.
     ``surplus_reading`` is the sensor as read, before settling (None for
     unavailable or no sensor), so the settle time can be judged against how
-    the real signal behaves.
+    the real signal behaves. Each room's ``window`` is its lockout sensor as
+    read, and ``window_open`` whether that stood it aside, so a replay can
+    feed the same input and check the same outcome.
     """
     intents = intents or {}
     return {
@@ -96,6 +99,8 @@ def record_for(
                 ),
                 "intent_source": (i.source if (i := intents.get(command.room)) else None),
                 "frost": command.frost,
+                "window": command.room in open_windows,
+                "window_open": command.window_open,
             }
             for command in plan.rooms
         },

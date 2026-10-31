@@ -112,6 +112,8 @@ class MultisplitCoordinator(DataUpdateCoordinator[Plan]):
             watched.update(room.temperature_sensors)
             if room.schedule_entity:
                 watched.add(room.schedule_entity)
+            if room.lockout_sensor:
+                watched.add(room.lockout_sensor)
 
         self.entry.async_on_unload(
             async_track_state_change_event(
@@ -179,6 +181,8 @@ class MultisplitCoordinator(DataUpdateCoordinator[Plan]):
             key: limits.allowed_modes for key, limits in self._constraints.items()
         }
 
+        open_windows = measurement.read_open_windows(self.hass, self.config)
+
         # A room switched off asks for nothing, votes for nothing and is given
         # no command -- the planner leaves it out, exactly as before, because
         # a room with demand that is never served is the starvation the aging
@@ -195,6 +199,7 @@ class MultisplitCoordinator(DataUpdateCoordinator[Plan]):
             now=now,
             frost=self.config.frost,
             standby=frozenset(self.excluded),
+            open_windows=open_windows,
         )
 
         self._runtime = {
@@ -218,12 +223,12 @@ class MultisplitCoordinator(DataUpdateCoordinator[Plan]):
                 _LOGGER.debug("multisplit: shadow mode, would write: %s", "; ".join(self.pending))
 
         await self._async_record(
-            plan, measurements, outdoor, intents, surplus, surplus_reading
+            plan, measurements, outdoor, intents, surplus, surplus_reading, open_windows
         )
         return plan
 
     async def _async_record(
-        self, plan, measurements, outdoor, intents, surplus, surplus_reading
+        self, plan, measurements, outdoor, intents, surplus, surplus_reading, open_windows
     ) -> None:
         """Keep the cycle. Never let recording it break the cycle itself."""
         record = record_for(
@@ -237,6 +242,7 @@ class MultisplitCoordinator(DataUpdateCoordinator[Plan]):
             surplus=surplus,
             surplus_reading=surplus_reading,
             away=self.away,
+            open_windows=open_windows,
         )
         self.telemetry.remember(record)
 
@@ -436,6 +442,28 @@ class MultisplitCoordinator(DataUpdateCoordinator[Plan]):
         self.overrides.pop(room, None)
         await self.async_request_refresh()
 
+    async def async_resume_schedule(self, room: str) -> None:
+        """Back to the schedule now: no override, and not away on its own.
+
+        The house-wide away switch is not this room's to undo, so it stays;
+        while it is on the room keeps the setback, and the card says why.
+        """
+        had_override = self.overrides.pop(room, None) is not None
+        was_away = self.rooms_away.pop(room, False) is not False
+        if was_away:
+            self.store.set_room_away(room, False)
+        _LOGGER.info(
+            "multisplit: %s back on its schedule (%s)",
+            room,
+            ", ".join(
+                what
+                for what, done in (("override cleared", had_override), ("room away off", was_away))
+                if done
+            )
+            or "nothing to clear",
+        )
+        await self.async_request_refresh()
+
     def _unit_is_off(self, room: str) -> bool:
         """Whether a room's unit is seen off, or no longer exists at all.
 
@@ -507,6 +535,7 @@ class MultisplitCoordinator(DataUpdateCoordinator[Plan]):
                     intent.source if (intent := self.intents.get(command.room)) else None
                 ),
                 "frost_protection": command.frost,
+                "window_open": command.window_open,
                 "room_away": self.room_away(command.room),
                 "room_away_until": (
                     until.isoformat() if (until := self.rooms_away.get(command.room)) else None

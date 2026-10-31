@@ -124,6 +124,8 @@ class RoomStatusSensor(MultisplitRoomEntity, SensorEntity):
         command = plan.room(self._room)
         if command.mode:
             return "heating" if command.mode == "heat" else "cooling"
+        if command.window_open:
+            return "window open"
         if "not guessing" in command.because:
             return "no data"
         if command.wants is not None:
@@ -162,6 +164,7 @@ class RoomStatusSensor(MultisplitRoomEntity, SensorEntity):
             "group": self._spec.group,
             "climate_entity": self._spec.climate_entity,
             "frost_protection": command.frost,
+            "window_open": command.window_open,
         }
 
 

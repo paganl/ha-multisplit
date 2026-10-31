@@ -460,3 +460,38 @@ def test_an_older_file_with_a_low_setback_still_loads():
     for group in raw["groups"].values():
         group.get("policy", {}).pop("setpoint_range", None)
     assert load(raw).frost == FrostProtection(7.0, 10.0)
+
+
+# --------------------------------------------------------------------------
+# Window lockout
+# --------------------------------------------------------------------------
+
+
+def test_the_window_lockout_sensors_are_read_with_no_grace_of_their_own():
+    """The device's "Window lockout" entity has already waited out its grace."""
+    from datetime import timedelta
+
+    rooms = {r.key: r for r in load(GOOD).rooms}
+    assert rooms["living_room"].lockout_sensor == "binary_sensor.mitsubishi_ac_livingroom_window_lockout"
+    assert rooms["living_room"].lockout_grace == timedelta(0)
+    assert rooms["living_room"].as_room_config().lockout_grace == timedelta(0)
+    assert rooms["bedroom"].lockout_sensor is None
+
+
+def test_a_raw_contact_sensor_can_be_given_a_grace():
+    from datetime import timedelta
+
+    raw = changed("rooms.office.lockout_sensor", "binary_sensor.office_window")
+    raw["rooms"]["office"]["lockout_grace"] = 2
+    office = next(r for r in load(raw).rooms if r.key == "office")
+    assert office.as_room_config().lockout_grace == timedelta(minutes=2)
+
+
+def test_a_lockout_sensor_in_the_wrong_domain_is_rejected():
+    with pytest.raises(ConfigError, match="lockout_sensor"):
+        load(changed("rooms.office.lockout_sensor", "sensor.office_window"))
+
+
+def test_a_lockout_grace_with_no_sensor_is_rejected():
+    with pytest.raises(ConfigError, match="no 'lockout_sensor'"):
+        load(changed("rooms.office.lockout_grace", 2))

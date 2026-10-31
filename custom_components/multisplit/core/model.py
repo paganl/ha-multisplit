@@ -218,6 +218,10 @@ class RoomConfig:
     room: str
     group: str
     participation: ParticipationPolicy
+    #: How long a window or door must stay open before the room stands down.
+    #: A door walked through, or a window opened to shake a duster, should not
+    #: switch a unit off and restart its rest period.
+    lockout_grace: timedelta = timedelta(minutes=2)
 
 
 @dataclass(frozen=True)
@@ -241,6 +245,10 @@ class RoomRuntime:
     #: single write can be rate-limited or fail, and nothing else would retry
     #: it for a room that is otherwise left alone.
     releasing: bool = False
+    #: When the room's window or door was first seen open, None while closed.
+    #: Kept here rather than in the caller so the grace period is decided in
+    #: the pure layer, where it is tested.
+    open_since: datetime | None = None
 
     def elapsed(self, now: datetime) -> timedelta:
         if self.since is None:
@@ -356,6 +364,7 @@ class RoomCommand:
     heat_to: float | None = None
     cool_to: float | None = None
     frost: bool = False  # heating because the room is below the frost threshold
+    window_open: bool = False  # stood down because a window or door is open
 
     @property
     def standing_by(self) -> bool:

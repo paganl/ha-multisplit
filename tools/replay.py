@@ -66,6 +66,10 @@ def replay(records, config, *, outdoor=None, freshness="recorded", surplus=None)
         solar = record.get("surplus", False) if surplus is None else surplus
 
         measurements, intents = {}, {}
+        # Recorded since windows were added; older records had none open.
+        open_windows = frozenset(
+            key for key, room in record["rooms"].items() if key in known and room.get("window")
+        )
         for key, room in record["rooms"].items():
             if key not in known:
                 continue
@@ -103,6 +107,7 @@ def replay(records, config, *, outdoor=None, freshness="recorded", surplus=None)
             outdoor=out,
             now=now,
             frost=config.frost,
+            open_windows=open_windows,
         )
 
         runtime = {r.room: r for r in result.runtime}

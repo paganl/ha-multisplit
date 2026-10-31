@@ -95,6 +95,10 @@ class RoomSpec:
     #: and thermostat overrides alike. Defaults to the group's setpoint range.
     min_target: float = 15.0
     max_target: float = 26.0
+    #: On while a window or door is open; None when the room has none.
+    lockout_sensor: str | None = None
+    #: How long it must read open before the room stands aside.
+    lockout_grace: timedelta = timedelta(0)
 
     def as_room_config(self) -> RoomConfig:
         """The planner's view of this room: where it is and how its unit behaves.
@@ -102,7 +106,12 @@ class RoomSpec:
         Entity ids deliberately do not cross this line. The planner has no
         business knowing what a room is wired to.
         """
-        return RoomConfig(room=self.key, group=self.group, participation=self.participation)
+        return RoomConfig(
+            room=self.key,
+            group=self.group,
+            participation=self.participation,
+            lockout_grace=self.lockout_grace,
+        )
 
 
 @dataclass(frozen=True)
@@ -598,6 +607,21 @@ def load(raw: object) -> SystemConfig:
             reader.fail(where, f"'schedule_entity' should look like schedule.something, found {schedule!r}")
             schedule = None
 
+        # Optional: a binary sensor that is on while a window or door is open.
+        # Usually the indoor unit's own "Window lockout" entity, which has
+        # already waited out its grace on the device -- hence no grace here
+        # unless one is asked for, e.g. for a raw contact sensor.
+        lockout_sensor = (
+            reader.entity_id(body, "lockout_sensor", where, "binary_sensor")
+            if body.get("lockout_sensor") is not None
+            else None
+        )
+        lockout_grace = timedelta(0)
+        if "lockout_grace" in body:
+            lockout_grace = reader.minutes(body, "lockout_grace", where)
+            if lockout_sensor is None:
+                reader.fail(where, "'lockout_grace' is set but there is no 'lockout_sensor' for it to apply to")
+
         # One owner or several: `owner: Erin`, or `owner: [Paul, Anna]` for a
         # shared room.
         owner = body.get("owner")
@@ -664,6 +688,8 @@ def load(raw: object) -> SystemConfig:
                 owners=owners,
                 min_target=min_target,
                 max_target=max_target,
+                lockout_sensor=lockout_sensor,
+                lockout_grace=lockout_grace,
             )
         )
 

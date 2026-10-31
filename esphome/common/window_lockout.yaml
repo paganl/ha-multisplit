@@ -7,6 +7,11 @@
 # mode helper, which the integration no longer maintains, and would have
 # turned the unit on at its old remembered setpoint.
 #
+# It publishes its state as "Window Lockout" (on once the grace has passed),
+# which the multisplit integration reads as the room's `lockout_sensor` so it
+# stands the room aside too: no vote, no repeated commands the device would
+# refuse, and "window open" as the room's status.
+#
 # Required substitutions (set in the room file):
 #   ac_lockout_sensor  - HA binary sensor, on/open = a relevant window or door is open
 #   ac_lockout_delay   - grace period before switching off, e.g. 2min
@@ -51,6 +56,8 @@ binary_sensor:
                         format: "${room_label}: lockout sensor open; switching off in ${ac_lockout_delay}"
                     - script.execute: ac_lockout_timer
             else:
+              # Cleared the moment the window closes, so "Window Lockout"
+              # drops and the integration rejoins the room straight away.
               - script.stop: ac_lockout_timer
               - globals.set:
                   id: ac_lockout_active
@@ -59,6 +66,15 @@ binary_sensor:
                   level: INFO
                   tag: ac_lockout
                   format: "${room_label}: lockout sensor closed; lockout cleared, the integration will restore the unit"
+
+  # What the integration reads. Entity id:
+  # binary_sensor.<device name>_window_lockout, e.g.
+  # binary_sensor.mitsubishi_ac_livingroom_window_lockout
+  - platform: template
+    id: ac_window_lockout
+    name: "Window Lockout"
+    icon: mdi:window-open-variant
+    lambda: 'return id(ac_lockout_active);'
 
 script:
   - id: ac_lockout_timer

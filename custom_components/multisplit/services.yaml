@@ -56,6 +56,20 @@ clear_override:
       selector:
         text:
 
+resume_schedule:
+  name: Follow schedule now
+  description: >-
+    Put a room straight back on its schedule: drops its thermostat override
+    and takes it out of room away. The house-wide away switch is left alone,
+    and still holds every room at the setback while it is on.
+  fields:
+    room:
+      name: Room
+      required: true
+      example: living_room
+      selector:
+        text:
+
 set_schedule:
   name: Set schedule
   description: >-
