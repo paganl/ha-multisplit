@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+**Fixed**
+
+- **Temperatures missing on the schedule card in a desktop browser.** The
+  card switched to its phone layout — lines only, labels hidden — whenever it
+  was narrower than 480 px, and a desktop dashboard column usually is. The
+  overview layout now applies only on touch screens; with a mouse the labels
+  stay at any width, and hovering a mark shows its day, time and temperature.
+
 ## 0.6.0 — 2026-10-31
 
 The first full release since 0.4.0. Open windows now stand a room aside, the
