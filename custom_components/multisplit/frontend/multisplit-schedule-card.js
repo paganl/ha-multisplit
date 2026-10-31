@@ -140,10 +140,12 @@ class MultisplitScheduleCard extends HTMLElement {
     if (!rooms.length) return this._renderEmpty();
     if (!this._room || !rooms.includes(this._room)) this._selectRoom(rooms[0]);
     // Home Assistant sets hass on every state change anywhere in the house.
-    // Only this room, the away switch and the room list matter here, and a
-    // redraw while someone is typing a time would throw their input away.
+    // Only this room, the away switch, the room list and which rooms have a
+    // window open matter here, and a redraw while someone is typing a time
+    // would throw their input away.
     const awayId = this._awaySwitch();
-    const watched = [hass.states[this._room], awayId && hass.states[awayId], rooms.join()];
+    const windows = rooms.filter((id) => this._windowOpen(id)).join();
+    const watched = [hass.states[this._room], awayId && hass.states[awayId], rooms.join(), windows];
     const same = this._watched && watched.every((v, i) => v === this._watched[i]);
     if (same && this.shadowRoot.querySelector("ha-card")) return;
     const active = this.shadowRoot.activeElement;
@@ -173,6 +175,18 @@ class MultisplitScheduleCard extends HTMLElement {
   _attrs() {
     const s = this._hass.states[this._room];
     return s ? s.attributes : {};
+  }
+
+  /** Standing aside because a window or door is open. */
+  _windowOpen(id) {
+    const s = this._hass.states[id];
+    return !!(s && s.attributes.window_open);
+  }
+
+  _windowIcon(label) {
+    return `<ha-icon class="window" icon="mdi:window-open-variant"
+      title="${esc(label)}: window open, so its unit is off; it rejoins when the window closes"
+      aria-label="window open"></ha-icon>`;
   }
 
   _awaySwitch() {
@@ -647,7 +661,9 @@ class MultisplitScheduleCard extends HTMLElement {
               const s = this._hass.states[id];
               const label = (s && s.attributes.friendly_name) || id;
               return `<button role="tab" class="room${id === this._room ? " on" : ""}" data-room="${esc(id)}"
-                aria-selected="${id === this._room}">${esc(label)}</button>`;
+                aria-selected="${id === this._room}">${esc(label)}${
+                  this._windowOpen(id) ? this._windowIcon(label) : ""
+                }</button>`;
             })
             .join("")}</div>`
         : "";
@@ -668,7 +684,7 @@ class MultisplitScheduleCard extends HTMLElement {
       ${tabs}
       <div class="head">
         <div>
-          <h2>${esc(name)}</h2>
+          <h2>${esc(name)}${this._windowOpen(this._room) ? this._windowIcon(name) : ""}</h2>
           <p class="status">${state ? this._status(a) : "Unavailable"}</p>
           <p class="rails">Allowed ${fmt(lo)}–${fmt(hi)}°. Each setting at least ${block} min.${
             this._owners().length
@@ -837,6 +853,8 @@ const STYLE = `<style>
     border: 1px solid var(--divider-color); background: none; color: var(--primary-text-color);
   }
   .room.on { background: var(--primary-color); border-color: var(--primary-color); color: var(--text-primary-color, #fff); }
+  ha-icon.window { --mdc-icon-size: 1em; margin-left: 0.35em; vertical-align: -0.1em; color: var(--warning-color, #ff9800); }
+  .room.on ha-icon.window { color: inherit; }
   .head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
   h2 { margin: 0; font-size: 1.35em; font-weight: 500; letter-spacing: -0.01em; }
   .status { margin: 4px 0 0; color: var(--primary-text-color); }

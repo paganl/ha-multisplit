@@ -166,6 +166,8 @@ class RoomClimate(MultisplitRoomEntity, ClimateEntity):
             "group_mode": plan.group(self._spec.group).mode or "off",
             "group_reason": plan.group(self._spec.group).because,
             "frost_protection": command.frost,
+            # The schedule card's window icon reads this.
+            "window_open": command.window_open,
         }
 
     # -- what it writes: intent, never hardware ------------------------
