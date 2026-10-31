@@ -1,0 +1,95 @@
+# Window/door lockout: turns the unit off when the room's lockout sensor has
+# been open for the grace period, and refuses to turn it back on while open.
+#
+# It does NOT restore the unit when the window closes. The multisplit
+# integration reconciles every unit each cycle, so it puts the unit back in
+# the mode and setpoint the plan wants. The old restore read the group HVAC
+# mode helper, which the integration no longer maintains, and would have
+# turned the unit on at its old remembered setpoint.
+#
+# Required substitutions (set in the room file):
+#   ac_lockout_sensor  - HA binary sensor, on/open = a relevant window or door is open
+#   ac_lockout_delay   - grace period before switching off, e.g. 2min
+#   room_label         - used in log lines only
+
+globals:
+  # True once the grace period has expired while the sensor is open.
+  # Restored across reboots so a unit that restarts with the window still
+  # open stays off immediately rather than after another grace period.
+  - id: ac_lockout_active
+    type: bool
+    restore_value: yes
+    initial_value: 'false'
+
+binary_sensor:
+  - platform: homeassistant
+    id: ac_lockout_open
+    entity_id: ${ac_lockout_sensor}
+    internal: true
+    trigger_on_initial_state: true
+    on_state:
+      then:
+        - if:
+            condition:
+              binary_sensor.is_on: ac_lockout_open
+            then:
+              - if:
+                  condition:
+                    lambda: 'return id(ac_lockout_active);'
+                  then:
+                    - logger.log:
+                        level: INFO
+                        tag: ac_lockout
+                        format: "${room_label}: lockout sensor open and lockout already active; keeping unit off"
+                    - climate.control:
+                        id: hp
+                        mode: "OFF"
+                  else:
+                    - logger.log:
+                        level: INFO
+                        tag: ac_lockout
+                        format: "${room_label}: lockout sensor open; switching off in ${ac_lockout_delay}"
+                    - script.execute: ac_lockout_timer
+            else:
+              - script.stop: ac_lockout_timer
+              - globals.set:
+                  id: ac_lockout_active
+                  value: 'false'
+              - logger.log:
+                  level: INFO
+                  tag: ac_lockout
+                  format: "${room_label}: lockout sensor closed; lockout cleared, the integration will restore the unit"
+
+script:
+  - id: ac_lockout_timer
+    mode: restart
+    then:
+      - delay: ${ac_lockout_delay}
+      - if:
+          condition:
+            binary_sensor.is_on: ac_lockout_open
+          then:
+            - globals.set:
+                id: ac_lockout_active
+                value: 'true'
+            - logger.log:
+                level: INFO
+                tag: ac_lockout
+                format: "${room_label}: lockout active; turning unit off"
+            - climate.control:
+                id: hp
+                mode: "OFF"
+
+climate:
+  - id: !extend hp
+    on_control:
+      then:
+        - lambda: |-
+            if (id(ac_lockout_active) &&
+                id(ac_lockout_open).has_state() &&
+                id(ac_lockout_open).state &&
+                x.get_mode().has_value() &&
+                x.get_mode().value() != climate::CLIMATE_MODE_OFF) {
+              ESP_LOGI("ac_lockout", "${room_label}: lockout active; refusing to turn the unit on");
+              x.set_mode(climate::CLIMATE_MODE_OFF);
+            }
