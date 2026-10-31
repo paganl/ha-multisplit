@@ -45,11 +45,6 @@ wifi:
     ssid: "${friendly_name} Fallback"
     password: !secret mitsubishi_ac_erin_ap_password
 
-web_server:
-  auth:
-    username: skull
-    password: !secret mitsubishi_ac_erin_web_password
-
 climate:
   - id: !extend hp
     supports:

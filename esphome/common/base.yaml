@@ -23,11 +23,10 @@ ota:
 
 captive_portal:
 
+# Default scan parameters on purpose. The old interval = window = 1100ms
+# had the radio listening for Bluetooth 100% of the time, which ESPHome
+# warns can make Wi-Fi unstable on a Wi-Fi proxy.
 esp32_ble_tracker:
-  scan_parameters:
-    interval: 1100ms
-    window: 1100ms
-    active: true
 
 bluetooth_proxy:
   active: true
