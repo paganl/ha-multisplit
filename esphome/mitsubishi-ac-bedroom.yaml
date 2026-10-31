@@ -1,0 +1,43 @@
+substitutions:
+  device_name: mitsubishi-ac-bedroom
+  friendly_name: "mitsubishi-ac-bedroom"
+  restart_button_name: "Bedroom A/C Restart"
+
+  remote_temp_sensor: sensor.bedroom_current_temperature
+
+  hp_rx_pin: GPIO26
+  hp_tx_pin: GPIO25
+
+packages:
+  # Local: holds your Wi-Fi secrets.
+  wifi: !include common/wifi.yaml
+  # Shared config, maintained in GitHub. After changing it there, use
+  # Clean Build Files on this device before installing, or the cached
+  # copy (refreshed daily) is used.
+  shared:
+    url: https://github.com/paganl/ha-multisplit
+    ref: main
+    refresh: 1d
+    files:
+      - esphome/common/base.yaml
+      - esphome/common/cn105.yaml
+      - esphome/common/diagnostics.yaml
+  # No window lockout sensor for this room yet. To add one, list
+  # esphome/common/window_lockout.yaml above and set ac_lockout_sensor,
+  # ac_lockout_delay and room_label in substitutions.
+
+api:
+  encryption:
+    key: !secret mitsubishi_ac_bedroom_api_key
+
+wifi:
+  ap:
+    ssid: "${friendly_name} Fallback"
+    password: !secret mitsubishi_ac_bedroom_ap_password
+
+climate:
+  - id: !extend hp
+    supports:
+      swing_mode:
+        - 'OFF'
+        - VERTICAL

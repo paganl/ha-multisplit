@@ -1,11 +1,16 @@
 # ESPHome packages for the indoor units
 
 Shared configuration for the five ESP32 + CN105 controllers. The room files
-stay in Home Assistant's ESPHome folder (they hold the per-unit substitutions
-and `!secret` references); they pull these files from this repository as
+(`mitsubishi-ac-*.yaml`) hold the per-unit substitutions and `!secret`
+references, and live in Home Assistant's ESPHome folder; the copies here are a
+record of them, so keep them in step when you change one. They pull
+`common/` from this repository as
 [remote packages](https://esphome.io/components/packages/), so the shared parts
 can be maintained here rather than in the Device Builder, which does not show
 package files.
+
+The room files expect a local `common/wifi.yaml` and a `secrets.yaml` next to
+them in Home Assistant; neither belongs in this repository.
 
 | File | What it holds | Needs these substitutions |
 | --- | --- | --- |

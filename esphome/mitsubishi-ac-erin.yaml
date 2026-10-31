@@ -1,0 +1,60 @@
+substitutions:
+  device_name: mitsubishi-ac-erin
+  friendly_name: "mitsubishi-ac-erin"
+  room_label: Erin's bedroom
+  restart_button_name: "Erins AC Restart"
+
+  remote_temp_sensor: sensor.erinbedroomtemp
+
+  # HA binary sensor group: on/open = a window or door in this room is open.
+  ac_lockout_sensor: binary_sensor.ac_lockout_erin_bedroom
+  ac_lockout_delay: 2min
+
+  hp_rx_pin: GPIO26
+  hp_tx_pin: GPIO25
+
+packages:
+  # Local: holds your Wi-Fi secrets.
+  wifi: !include common/wifi.yaml
+  # Shared config, maintained in GitHub. After changing it there, use
+  # Clean Build Files on this device before installing, or the cached
+  # copy (refreshed daily) is used.
+  shared:
+    url: https://github.com/paganl/ha-multisplit
+    ref: main
+    refresh: 1d
+    files:
+      - esphome/common/base.yaml
+      - esphome/common/cn105.yaml
+      - esphome/common/window_lockout.yaml
+      - esphome/common/diagnostics.yaml
+
+# This unit runs esp-idf; the others run Arduino. Kept as-is because
+# switching framework over the air can fail on a partition-layout change.
+# Move it to Arduino over USB if you want all five the same.
+esp32:
+  framework:
+    type: esp-idf
+
+api:
+  encryption:
+    key: !secret mitsubishi_ac_erin_api_key
+
+wifi:
+  ap:
+    ssid: "${friendly_name} Fallback"
+    password: !secret mitsubishi_ac_erin_ap_password
+
+web_server:
+  auth:
+    username: skull
+    password: !secret mitsubishi_ac_erin_web_password
+
+climate:
+  - id: !extend hp
+    supports:
+      swing_mode:
+        - 'OFF'
+        - VERTICAL
+    horizontal_vane_select:
+      name: "${friendly_name} Horizontal Vane"

@@ -1,0 +1,48 @@
+substitutions:
+  device_name: mitsubishi-ac-livingroom
+  friendly_name: mitsubishi-ac-livingroom
+  room_label: Living room
+  restart_button_name: "Living Room A/C Restart"
+
+  remote_temp_sensor: sensor.average_living_room_temperature
+
+  # HA binary sensor group: on/open = a living room window or door is open.
+  ac_lockout_sensor: binary_sensor.ac_lockout_living_room
+  ac_lockout_delay: 2min
+
+  hp_rx_pin: GPIO26
+  hp_tx_pin: GPIO25
+
+packages:
+  # Local: holds your Wi-Fi secrets.
+  wifi: !include common/wifi.yaml
+  # Shared config, maintained in GitHub. After changing it there, use
+  # Clean Build Files on this device before installing, or the cached
+  # copy (refreshed daily) is used.
+  shared:
+    url: https://github.com/paganl/ha-multisplit
+    ref: main
+    refresh: 1d
+    files:
+      - esphome/common/base.yaml
+      - esphome/common/cn105.yaml
+      - esphome/common/window_lockout.yaml
+      - esphome/common/diagnostics.yaml
+
+api:
+  encryption:
+    key: !secret mitsubishi_ac_livingroom_api_key
+
+wifi:
+  ap:
+    ssid: "${friendly_name}"
+    password: !secret mitsubishi_ac_livingroom_ap_password
+
+climate:
+  - id: !extend hp
+    horizontal_vane_select:
+      name: Horizontal Vane
+      disabled_by_default: false
+    isee_sensor:
+      name: ISEE Sensor
+      disabled_by_default: false
