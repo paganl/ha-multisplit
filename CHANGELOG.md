@@ -1,16 +1,11 @@
 # Changelog
 
-## Unreleased
+## 0.6.0 — 2026-10-31
 
-**Added**
-
-- **A window icon on the schedule card.** When a room is standing aside
-  because a window or door is open, an open-window icon appears next to its
-  name and on its tab, so a glance at the card shows which rooms have a
-  window open without switching between them. Hover for what it means. The
-  rooms' thermostats carry a `window_open` attribute for it.
-
-## Unreleased
+The first full release since 0.4.0. Open windows now stand a room aside, the
+schedule card gets **Follow schedule** and a window icon in place of the
+house-wide Away button, and everything in 0.5.0 below — schedules, owners,
+away and frost protection, shipped as betas 1–5 — is included.
 
 **Added**
 
@@ -33,6 +28,11 @@
 - Telemetry records each room's `window` (the sensor as read) and
   `window_open` (whether it stood the room aside); `tools/replay.py` feeds the
   former back in.
+- **A window icon on the schedule card.** When a room is standing aside
+  because a window or door is open, an open-window icon appears next to its
+  name and on its tab, so a glance at the card shows which rooms have a
+  window open without switching between them. Hover for what it means. The
+  rooms' thermostats carry a `window_open` attribute for it.
 
 **Changed**
 
@@ -40,6 +40,10 @@
   home/away presets, so a house-wide toggle on a per-room card was the wrong
   control; `switch.multisplit_away` is unchanged, and the card still shows a
   banner while it is on.
+- The ESPHome room files fetch `esphome/common/` on every build
+  (`refresh: always`). ESPHome caches remote packages where **Clean Build
+  Files** does not reach, so with `refresh: 1d` a device kept building from
+  an older copy. Copy the new room files into Home Assistant's ESPHome folder.
 
 ## 0.5.0 — 2026-10-29
 
