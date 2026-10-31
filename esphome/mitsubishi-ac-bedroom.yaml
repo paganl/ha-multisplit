@@ -21,8 +21,8 @@ packages:
     files:
       - esphome/common/base.yaml
       - esphome/common/cn105.yaml
+      - esphome/common/window_lockout.yaml
       - esphome/common/diagnostics.yaml
-  # No window lockout sensor for this room yet. To add one, list
   # esphome/common/window_lockout.yaml above and set ac_lockout_sensor,
   # ac_lockout_delay and room_label in substitutions.
 
