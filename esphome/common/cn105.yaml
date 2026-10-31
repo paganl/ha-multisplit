@@ -1,0 +1,106 @@
+# CN105 link to the indoor unit, the climate entity, and the room temperature
+# fed to the unit.
+#
+# Required substitutions (set in the room file):
+#   friendly_name       - prefixes entity names; keep it unchanged, because
+#                         multisplit.yaml refers to the climate entity by id
+#   remote_temp_sensor  - Home Assistant sensor with the room temperature
+#   hp_rx_pin, hp_tx_pin
+#   restart_button_name
+#
+# Per-unit extras (vanes, i-see, outside air, runtime) are added in the room
+# file with `climate: - id: !extend hp`.
+
+external_components:
+  # echavet upstream, pinned to the merge of PR #744 (21 Oct 2026). That PR
+  # is what the GioMez fork carried: without it the component does not
+  # compile on ESPHome 2026.10+. Move to the next tagged release once one
+  # is published after that date.
+  - source: github://echavet/MitsubishiCN105ESPHome@5250ba782c261ae98fe54abd2475ae7ea7836475
+
+uart:
+  - id: hp_uart
+    baud_rate: 2400
+    parity: EVEN
+    data_bits: 8
+    stop_bits: 1
+    rx_pin: ${hp_rx_pin}  # ESP32 RX <- level shifter <- CN105 TX
+    tx_pin: ${hp_tx_pin}  # ESP32 TX -> level shifter -> CN105 RX
+
+climate:
+  - platform: cn105
+    id: hp
+    name: "${friendly_name} Climate"
+    uart_id: hp_uart
+    update_interval: 3s
+
+    # The integration plans in half degrees and rewrites any unit that is
+    # more than 0.05 degrees off. A unit stepping in whole degrees would be
+    # rewritten every interval, forever.
+    visual:
+      temperature_step:
+        target_temperature: 0.5
+        current_temperature: 0.5
+
+    # Room temperature from Home Assistant, bound natively. The unit keeps
+    # using it as long as it is re-sent; the keepalive does that even when
+    # the reading holds steady (HA only reports changes).
+    remote_temperature_source:
+      sensor_id: ha_remote_temp
+      info:
+        name: "${friendly_name} Remote Temp Source"
+    remote_temperature_timeout: 30min
+    remote_temperature_keepalive_interval: 20s
+
+    supports:
+      # No AUTO / HEAT_COOL: in those the indoor unit picks heating or
+      # cooling itself, which is the decision the multisplit integration
+      # makes for the whole outdoor unit.
+      mode:
+        - COOL
+        - HEAT
+        - DRY
+        - FAN_ONLY
+      fan_mode:
+        - AUTO
+        - MIDDLE
+        - QUIET
+        - LOW
+        - MEDIUM
+        - HIGH
+      dual_setpoint: false
+
+    vertical_vane_select:
+      name: "${friendly_name} Vertical Vane"
+
+    kwh_sensor:
+      name: "${friendly_name} Energy Usage"
+
+    input_power_sensor:
+      name: "${friendly_name} Input Power"
+
+sensor:
+  - platform: homeassistant
+    id: ha_remote_temp
+    name: "${friendly_name} External Room Temperature"
+    entity_id: ${remote_temp_sensor}
+    internal: false
+    device_class: temperature
+    state_class: measurement
+    unit_of_measurement: "°C"
+    filters:
+      - clamp:
+          min_value: 8.0
+          max_value: 39.5
+          ignore_out_of_range: true
+      - throttle: 30s
+    on_value:
+      then:
+        - logger.log:
+            level: INFO
+            format: "External room temperature for the unit: %.1f C"
+            args: ["x"]
+
+button:
+  - platform: restart
+    name: "${restart_button_name}"

@@ -1,0 +1,26 @@
+# Diagnostics every unit exposes. Names match what erin and ischa already
+# had, so their existing entities keep their ids.
+
+sensor:
+  - platform: uptime
+    name: Uptime
+
+  - platform: wifi_signal
+    name: WiFi Signal
+    update_interval: 120s
+
+text_sensor:
+  - platform: version
+    name: ESPHome Version
+
+  - platform: wifi_info
+    ip_address:
+      name: IP
+    ssid:
+      name: SSID
+    bssid:
+      name: BSSID
+
+time:
+  - platform: homeassistant
+    id: homeassistant_time
