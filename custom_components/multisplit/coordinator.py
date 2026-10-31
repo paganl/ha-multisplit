@@ -202,10 +202,20 @@ class MultisplitCoordinator(DataUpdateCoordinator[Plan]):
             open_windows=open_windows,
         )
 
+        # A released room whose unit is seen off drops back to no memory --
+        # except its window clock, or the grace would restart.
         self._runtime = {
-            runtime.room: runtime
+            runtime.room: (
+                RoomRuntime(runtime.room, open_since=runtime.open_since)
+                if runtime.releasing and self._unit_is_off(runtime.room)
+                else runtime
+            )
             for runtime in plan.runtime
-            if not (runtime.releasing and self._unit_is_off(runtime.room))
+            if not (
+                runtime.releasing
+                and runtime.open_since is None
+                and self._unit_is_off(runtime.room)
+            )
         }
         for decision in plan.groups:
             previous = self._group_state.get(decision.group, GroupState(decision.group))

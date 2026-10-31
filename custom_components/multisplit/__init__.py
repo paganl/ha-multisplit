@@ -273,11 +273,11 @@ def _async_check_entities_later(
         # early.
         described = describe_missing(missing, hass.states.async_entity_ids())
         _LOGGER.warning(
-            "multisplit: %d configured %s not exist, so %s will be treated as "
-            "having no reading: %s",
+            "multisplit: %d configured %s not exist; a room missing its "
+            "temperature has no reading, and one missing its window sensor is "
+            "treated as closed: %s",
             len(missing),
             "entity does" if len(missing) == 1 else "entities do",
-            "that room" if len(missing) == 1 else "those rooms",
             "; ".join(described),
         )
 

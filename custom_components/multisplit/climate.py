@@ -114,6 +114,8 @@ class RoomClimate(MultisplitRoomEntity, ClimateEntity):
         if plan is None:
             return HVACAction.IDLE
         command = plan.room(self._room)
+        if command.window_open:
+            return HVACAction.OFF  # commanded off, not waiting its turn
         if command.mode is None:
             return HVACAction.IDLE
         return HVACAction.HEATING if command.mode == HEAT else HVACAction.COOLING

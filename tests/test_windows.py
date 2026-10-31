@@ -188,3 +188,59 @@ def test_a_closed_switched_off_room_still_has_no_memory_at_all():
     result = run({"lounge": 18.0}, standby={"lounge"})
 
     assert result.runtime == ()
+
+
+def test_with_no_grace_the_room_stands_aside_on_the_first_cycle():
+    """Production: the device's Window Lockout has already waited its grace."""
+    result = plan(
+        rooms=[RoomConfig("lounge", "a", DUTY)],
+        measurements={"lounge": RoomMeasurement("lounge", 18.0, source="test")},
+        intents={"lounge": RoomIntent("lounge", 20.0)},
+        constraints={"a": Constraints()},
+        runtime={},
+        group_state={"a": GroupState("a")},
+        outdoor=5.0,
+        now=NOW,
+        open_windows=frozenset({"lounge"}),
+    )
+
+    command = result.room("lounge")
+    assert command.window_open and command.mode is None
+    assert "standing aside in" not in command.because
+
+
+def test_when_frost_protection_releases_with_the_window_still_open_the_room_goes_aside():
+    protected = opened(timedelta(minutes=30), running=True, mode=HEAT, frost=True,
+                       since=NOW - timedelta(minutes=20))
+    result = run(
+        {"lounge": 10.5},  # above the release threshold
+        open_windows={"lounge"},
+        runtime={"lounge": protected},
+        frost=FrostProtection(below=8.0, release=10.0),
+    )
+
+    command = result.room("lounge")
+    assert command.window_open and command.mode is None
+    after = memory(result, "lounge")
+    assert not after.frost and not after.running
+
+
+def test_a_stale_reading_does_not_keep_a_room_in_while_its_window_is_open():
+    stale_running = opened(
+        timedelta(minutes=5), running=True, mode=HEAT, since=NOW - timedelta(hours=1),
+        untrusted_since=NOW - timedelta(minutes=1),
+    )
+    result = plan(
+        rooms=rooms("lounge"),
+        measurements={"lounge": RoomMeasurement("lounge", 18.0, stale=True, source="test")},
+        intents={"lounge": RoomIntent("lounge", 20.0)},
+        constraints={"a": Constraints()},
+        runtime={"lounge": stale_running},
+        group_state={"a": GroupState("a", HEAT, NOW - timedelta(hours=1))},
+        outdoor=5.0,
+        now=NOW,
+        open_windows=frozenset({"lounge"}),
+    )
+
+    assert result.room("lounge").window_open
+    assert result.room("lounge").mode is None, "the stale-sensor grace must not hold it on"

@@ -375,3 +375,65 @@ def test_a_change_in_surplus_is_always_written(tmp_path):
         (False, True),
         (True, True),
     ]
+
+
+# --------------------------------------------------------------------------
+# Open windows
+# --------------------------------------------------------------------------
+
+
+def _windowed(record, *, window, aside):
+    record["rooms"]["living_room"]["window"] = window
+    record["rooms"]["living_room"]["window_open"] = aside
+    return record
+
+
+def test_a_stop_for_an_open_window_is_not_a_cut_off():
+    """Stood aside mid-cycle, the overshoot at that moment is arbitrary."""
+    records = stop_cycle_records()
+    _windowed(records[1], window=True, aside=True)
+
+    assert observed_overshoot(records) == []
+    assert fit_curves.extract(records, None) == []
+
+
+def test_a_window_opened_while_coasting_drops_the_cycle():
+    records = stop_cycle_records()
+    _windowed(records[2], window=True, aside=False)  # opened, still in its grace
+
+    assert fit_curves.extract(records, None) == [], "its drift is the weather's"
+    assert observed_overshoot(records) == [(7.0, 1.5)], "the stop itself was a real cut-off"
+
+
+def test_a_window_opening_or_a_room_standing_aside_is_always_written(tmp_path):
+    telemetry = Telemetry(CONFIG.telemetry, tmp_path)
+    base = dict(outdoor=7.0, measured=21.0, target=21.0, mode=None, group_mode=None)
+    telemetry.write(_windowed(cycle(at=NOW, **base), window=False, aside=False))
+    telemetry.write(
+        _windowed(cycle(at=NOW + timedelta(seconds=30), **base), window=True, aside=False)
+    )
+    telemetry.write(
+        _windowed(cycle(at=NOW + timedelta(minutes=1), **base), window=True, aside=True)
+    )
+
+    reasons = [
+        json.loads(line)["why_recorded"]
+        for line in telemetry.path.read_text(encoding="utf-8").strip().splitlines()
+    ]
+    assert reasons == [
+        "first record",
+        "living_room window opened or closed",
+        "living_room stood aside or rejoined",
+    ]
+
+
+def test_a_record_says_whether_the_window_was_open_and_whether_that_counted():
+    plan = Plan(
+        groups=(GroupDecision("a", None, "off", {}, ()),),
+        rooms=(RoomCommand("living_room", None, 20.0, "stopped — window open", window_open=True),),
+        at=NOW,
+    )
+    record = record_for(plan, {}, 7.0, (), (), False, open_windows=frozenset({"living_room"}))
+
+    assert record["rooms"]["living_room"]["window"] is True
+    assert record["rooms"]["living_room"]["window_open"] is True

@@ -338,20 +338,34 @@ class MultisplitScheduleCard extends HTMLElement {
     this._render();
   }
 
-  /** Something set by hand that "Follow schedule" would clear. */
+  /**
+   * Something set by hand that "Follow schedule" would clear. Not
+   * "away (room)" on its own: a room's presence schedule reading off produces
+   * that too, and there is nothing to clear for it.
+   */
   _offSchedule(a) {
-    return a.target_source === "override" || a.target_source === "away (room)" || !!a.room_away;
+    return a.target_source === "override" || !!a.room_away;
+  }
+
+  _resumeTitle(a, houseAway) {
+    if (this._offSchedule(a)) return "Drop the thermostat setting and room away; back to the schedule now";
+    if (houseAway) return "The whole house is away; turn the away switch off to resume";
+    if (a.target_source === "away (room)") return "Away because its presence schedule is off";
+    return "Already following its schedule";
   }
 
   async _resumeSchedule() {
+    if (this._resuming) return;
     const a = this._attrs();
-    this._error = null;
+    this._resuming = true;
     try {
       await this._hass.callService("multisplit", "resume_schedule", { room: a.room });
+      this._error = null;
     } catch (err) {
       this._error = (err && err.message) || String(err);
-      this._render();
     }
+    this._resuming = false;
+    this._render();
   }
 
   _openDayList(day, mark = null) {
@@ -664,13 +678,8 @@ class MultisplitScheduleCard extends HTMLElement {
         </div>
         ${
           state
-            ? `<button class="resume" ${this._offSchedule(a) ? "" : "disabled"} title="${
-                this._offSchedule(a)
-                  ? "Drop the thermostat setting and room away; back to the schedule now"
-                  : away
-                  ? "The whole house is away; turn the away switch off to resume"
-                  : "Already following its schedule"
-              }">Follow schedule</button>`
+            ? `<button class="resume" ${this._offSchedule(a) ? "" : "disabled"}
+                title="${this._resumeTitle(a, away)}">Follow schedule</button>`
             : ""
         }
       </div>

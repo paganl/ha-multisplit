@@ -70,11 +70,23 @@ binary_sensor:
   # What the integration reads. Entity id:
   # binary_sensor.<device name>_window_lockout, e.g.
   # binary_sensor.mitsubishi_ac_livingroom_window_lockout
+  #
+  # Exactly the condition the on_control veto enforces, not the global alone:
+  # the global is restored across a reboot and only cleared by the contact
+  # sensor reporting closed, so on its own it could read on while the window
+  # sensor is still unknown -- or stay on if that sensor never comes back --
+  # while the device would happily run the unit. The short delayed_on covers
+  # the moment after a reboot before Home Assistant delivers the contact state.
   - platform: template
     id: ac_window_lockout
     name: "Window Lockout"
     icon: mdi:window-open-variant
-    lambda: 'return id(ac_lockout_active);'
+    lambda: |-
+      return id(ac_lockout_active) &&
+             id(ac_lockout_open).has_state() &&
+             id(ac_lockout_open).state;
+    filters:
+      - delayed_on: 5s
 
 script:
   - id: ac_lockout_timer

@@ -99,7 +99,8 @@ def extract(records: list[dict], only_room: str | None) -> list[Cycle]:
             running_before, running_now = bool(was.get("mode")), bool(now.get("mode"))
 
             if running_before and not running_now:
-                if outdoor is None or overshoot is None:
+                # Stopped for an open window: not a cut-off, so not a cycle.
+                if outdoor is None or overshoot is None or now.get("window_open"):
                     continue
                 cycle = Cycle(room, float(outdoor), float(overshoot))
                 open_cycles[room] = cycle
@@ -109,6 +110,14 @@ def extract(records: list[dict], only_room: str | None) -> list[Cycle]:
 
             cycle = open_cycles.get(room)
             if cycle is None:
+                continue
+
+            if now.get("window") or now.get("window_open"):
+                # A window opened while the room was coasting: its drift and
+                # recovery are the weather's, not the unit's. Drop the cycle.
+                cycles.remove(cycle)
+                open_cycles.pop(room, None)
+                stopped_at.pop(room, None)
                 continue
 
             if overshoot is not None:

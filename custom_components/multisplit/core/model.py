@@ -218,10 +218,12 @@ class RoomConfig:
     room: str
     group: str
     participation: ParticipationPolicy
-    #: How long a window or door must stay open before the room stands down.
-    #: A door walked through, or a window opened to shake a duster, should not
-    #: switch a unit off and restart its rest period.
-    lockout_grace: timedelta = timedelta(minutes=2)
+    #: How long a window or door must stay open before the room stands aside.
+    #: Zero, like the configuration's default, because the usual sensor is the
+    #: indoor unit's own "Window lockout", which has already waited out its
+    #: grace on the device. A raw contact sensor wants a couple of minutes, so
+    #: a door walked through does not switch a unit off and restart its rest.
+    lockout_grace: timedelta = timedelta(0)
 
 
 @dataclass(frozen=True)
