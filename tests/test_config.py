@@ -475,7 +475,7 @@ def test_the_window_lockout_sensors_are_read_with_no_grace_of_their_own():
     assert rooms["living_room"].lockout_sensor == "binary_sensor.mitsubishi_ac_livingroom_window_lockout"
     assert rooms["living_room"].lockout_grace == timedelta(0)
     assert rooms["living_room"].as_room_config().lockout_grace == timedelta(0)
-    assert rooms["bedroom"].lockout_sensor is None
+    assert rooms["office"].lockout_sensor is None
 
 
 def test_a_raw_contact_sensor_can_be_given_a_grace():

@@ -2,8 +2,14 @@ substitutions:
   device_name: mitsubishi-ac-bedroom
   friendly_name: "mitsubishi-ac-bedroom"
   restart_button_name: "Bedroom A/C Restart"
+  room_label: Bedroom
 
   remote_temp_sensor: sensor.bedroom_current_temperature
+
+  # HA binary sensor group: on/open = a window or door in this room is open.
+  # CHECK: named to match the other rooms; correct it if your group differs.
+  ac_lockout_sensor: binary_sensor.ac_lockout_bedroom
+  ac_lockout_delay: 2min
 
   hp_rx_pin: GPIO26
   hp_tx_pin: GPIO25
@@ -11,20 +17,18 @@ substitutions:
 packages:
   # Local: holds your Wi-Fi secrets.
   wifi: !include common/wifi.yaml
-  # Shared config, maintained in GitHub. After changing it there, use
-  # Clean Build Files on this device before installing, or the cached
-  # copy (refreshed daily) is used.
+  # Shared config, maintained in GitHub. Fetched fresh on every build:
+  # Clean Build Files does not clear the package cache, so a longer
+  # refresh would keep building from an old copy.
   shared:
     url: https://github.com/paganl/ha-multisplit
     ref: main
-    refresh: 1d
+    refresh: always
     files:
       - esphome/common/base.yaml
       - esphome/common/cn105.yaml
       - esphome/common/window_lockout.yaml
       - esphome/common/diagnostics.yaml
-  # esphome/common/window_lockout.yaml above and set ac_lockout_sensor,
-  # ac_lockout_delay and room_label in substitutions.
 
 api:
   encryption:

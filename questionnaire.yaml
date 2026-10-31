@@ -289,6 +289,7 @@ sections:
             group: b
             climate_entity: climate.mitsubishi_ac_bedroom_mitsubishi_ac_bedroom_climate
             temperature_sensors: []
+            lockout_sensor: binary_sensor.mitsubishi_ac_bedroom_window_lockout
           - key: erin
             name: Erin's Bedroom
             group: b

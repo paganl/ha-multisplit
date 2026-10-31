@@ -29,7 +29,7 @@ packages:
   shared:
     url: https://github.com/paganl/ha-multisplit
     ref: main
-    refresh: 1d
+    refresh: always
     files:
       - esphome/common/base.yaml
       - esphome/common/cn105.yaml
@@ -37,9 +37,10 @@ packages:
       - esphome/common/diagnostics.yaml
 ```
 
-ESPHome caches the repository for `refresh`. After pushing a change here, use
-**Clean Build Files** on a device in the Device Builder (or wait a day) before
-installing, or the old copy is used.
+`refresh: always` makes every Validate and Install fetch the repository. Keep
+it: ESPHome caches remote packages in `.esphome/packages`, which **Clean Build
+Files** does not clear, so with a longer refresh a change pushed here is not
+seen until that interval has passed.
 
 Unit-specific extras (vanes, i-see, outside air, runtime hours) belong in the
 room file, added to the climate entity with `climate: - id: !extend hp`.

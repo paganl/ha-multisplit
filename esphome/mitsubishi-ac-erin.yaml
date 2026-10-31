@@ -16,13 +16,13 @@ substitutions:
 packages:
   # Local: holds your Wi-Fi secrets.
   wifi: !include common/wifi.yaml
-  # Shared config, maintained in GitHub. After changing it there, use
-  # Clean Build Files on this device before installing, or the cached
-  # copy (refreshed daily) is used.
+  # Shared config, maintained in GitHub. Fetched fresh on every build:
+  # Clean Build Files does not clear the package cache, so a longer
+  # refresh would keep building from an old copy.
   shared:
     url: https://github.com/paganl/ha-multisplit
     ref: main
-    refresh: 1d
+    refresh: always
     files:
       - esphome/common/base.yaml
       - esphome/common/cn105.yaml
