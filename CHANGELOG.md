@@ -1,36 +1,5 @@
 # Changelog
 
-## Unreleased
-
-**Added**
-
-- **Open windows stand a room aside.** A room may name a `lockout_sensor`:
-  while it is on, the room votes for nothing, is not counted as unserved, its
-  unit is commanded off, and its status reads *window open*; it rejoins on the
-  next cycle once the sensor clears. Before this the integration did not know:
-  the cooling room kept voting for heat and its unit was re-commanded every
-  write interval, only for the device's own lockout to refuse. Frost
-  protection still wins over an open window, and a room switched off is
-  still left alone.
-- The indoor units publish their device-side lockout as a **Window Lockout**
-  entity (`esphome/common/window_lockout.yaml`), on once the device's grace
-  has passed. That is what `lockout_sensor` points at here, so the grace lives
-  in one place; `lockout_grace` (minutes, default 0) is for a raw contact
-  sensor instead.
-- **Follow schedule** on the schedule card, and `multisplit.resume_schedule`:
-  drops the room's thermostat override and takes it out of room away, so it
-  is back on its schedule now. The house-wide away switch is left alone.
-- Telemetry records each room's `window` (the sensor as read) and
-  `window_open` (whether it stood the room aside); `tools/replay.py` feeds the
-  former back in.
-
-**Changed**
-
-- The schedule card no longer has an **Away** button. Every room has its own
-  home/away presets, so a house-wide toggle on a per-room card was the wrong
-  control; `switch.multisplit_away` is unchanged, and the card still shows a
-  banner while it is on.
-
 ## 0.5.0 — 2026-10-29
 
 Rooms now follow schedules set by the people whose rooms they are. Seen in
@@ -77,12 +46,37 @@ the planner gave every room the same 20°.
   telemetry now say where each target came from (`override`, `away`,
   `schedule`, `default`), and telemetry records `away`.
 
+- **Open windows stand a room aside.** A room may name a `lockout_sensor`:
+  while it is on, the room votes for nothing, is not counted as unserved, its
+  unit is commanded off, and its status reads *window open*; it rejoins on the
+  next cycle once the sensor clears. Before this the integration did not know:
+  the cooling room kept voting for heat and its unit was re-commanded every
+  write interval, only for the device's own lockout to refuse. Frost
+  protection still wins over an open window, and a room switched off is
+  still left alone.
+- The indoor units publish their device-side lockout as a **Window Lockout**
+  entity (`esphome/common/window_lockout.yaml`), on once the device's grace
+  has passed. That is what `lockout_sensor` points at here, so the grace lives
+  in one place; `lockout_grace` (minutes, default 0) is for a raw contact
+  sensor instead.
+- **Follow schedule** on the schedule card, and `multisplit.resume_schedule`:
+  drops the room's thermostat override and takes it out of room away, so it
+  is back on its schedule now. The house-wide away switch is left alone.
+- Telemetry records each room's `window` (the sensor as read) and
+  `window_open` (whether it stood the room aside); `tools/replay.py` feeds the
+  former back in.
+
 **Changed**
 
 - **A thermostat turned by hand now holds until the room's schedule next
   changes**, not indefinitely. With no schedule it still holds until cleared.
   `multisplit.set_room_target` is unchanged.
 - Requires Home Assistant 2024.7 or later, for serving the card.
+
+- The schedule card no longer has an **Away** button. Every room has its own
+  home/away presets, so a house-wide toggle on a per-room card was the wrong
+  control; `switch.multisplit_away` is unchanged, and the card still shows a
+  banner while it is on.
 
 **Fixed during the beta** (from an independent review, before any report from
 a real install):
