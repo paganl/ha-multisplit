@@ -82,7 +82,9 @@ views:
       # Schedules. One line per day for each room; tap a line to drop a
       # mark, drag it to move it. Owners edit their own room, admins any.
       # Lists every multi-split room by itself; add `entities:` to choose.
-      # The Away button on it flips switch.multisplit_away.
+      # "Follow schedule" puts the shown room back on its schedule, dropping
+      # a thermostat setting or room away. Away for the whole house is
+      # switch.multisplit_away; the card shows a banner while it is on.
       # -------------------------------------------------------------------
       - type: custom:multisplit-schedule-card
 

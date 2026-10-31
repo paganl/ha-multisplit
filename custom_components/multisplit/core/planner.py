@@ -52,6 +52,12 @@ def _band(demand: "_Demand") -> str:
     return f"(target {_fmt(demand.heat_to)}°)"
 
 
+def _fmt_grace(left: timedelta) -> str:
+    """Time left on a short grace; whole minutes would say "0 min" for most of it."""
+    seconds = max(0, int(left.total_seconds()))
+    return f"{seconds} s" if seconds < 60 else _fmt_delta(left)
+
+
 def _fmt_delta(delta: timedelta) -> str:
     minutes = int(delta.total_seconds() // 60)
     if minutes < 60:
@@ -647,6 +653,7 @@ def plan(
     now: datetime,
     frost: FrostProtection | None = None,
     standby: frozenset[str] = frozenset(),
+    open_windows: frozenset[str] = frozenset(),
 ) -> Plan:
     """Turn facts into a plan. Pure: same inputs, same plan, always.
 
@@ -657,6 +664,14 @@ def plan(
     such a room is commanded off, undoing what frost protection did, and
     keeps being commanded off (``RoomRuntime.releasing``) until the caller
     sees the unit off and drops that memory; then it is left alone again.
+
+    ``open_windows`` names rooms whose window or door reads open right now.
+    Once one has been open for its ``lockout_grace`` it stands aside: it
+    votes for nothing, is not counted as unserved, and its unit is commanded
+    off -- unlike a switched-off room, which is left alone, because heating
+    the street is the thing to stop. Until the grace runs out it takes part
+    as normal, so a door walked through changes nothing. Frost protection
+    still wins over an open window; a switched-off room stays left alone.
 
     Every group gets a decision, even one whose rooms are all switched off,
     so nothing downstream has to cope with a group missing from the plan.
@@ -687,12 +702,62 @@ def plan(
             for room in all_members
         }
 
+        # When each room's window was first seen open, carried into the next
+        # cycle for every room -- a room in its grace, or switched off, must
+        # not have its clock restart.
+        opened_at = {
+            room.room: (
+                (runtime.get(room.room, RoomRuntime(room.room)).open_since or now)
+                if room.room in open_windows
+                else None
+            )
+            for room in all_members
+        }
+
         members: list[RoomConfig] = []
+        aside: list[str] = []
         for room in all_members:
+            was = runtime.get(room.room, RoomRuntime(room.room))
+            opened = opened_at[room.room]
+            if room.room not in standby and not freezing[room.room] and (
+                opened is not None and now - opened >= room.lockout_grace
+            ):
+                # Standing aside for an open window: off, and out of the vote.
+                intent = intents.get(room.room, RoomIntent(room.room, 20.0))
+                heat_to = limits.clamp(intent.heat_to)
+                verb = "stopped" if was.running else "standing by"
+                commands.append(
+                    RoomCommand(
+                        room=room.room,
+                        mode=None,
+                        target=heat_to,
+                        because=(
+                            f"{verb} — window open for {_fmt_delta(now - opened)}; "
+                            "rejoins when it closes"
+                        ),
+                        heat_to=heat_to,
+                        cool_to=max(heat_to, limits.clamp(intent.cool_to)),
+                        window_open=True,
+                    )
+                )
+                next_runtime.append(
+                    replace(
+                        was,
+                        running=False,
+                        mode=None,
+                        # Stopping is a transition: the rest period starts now.
+                        since=now if was.running else was.since,
+                        unserved_since=None,
+                        frost=False,
+                        releasing=False,
+                        open_since=opened,
+                    )
+                )
+                aside.append(room.room)
+                continue
             if room.room not in standby or freezing[room.room]:
                 members.append(room)
                 continue
-            was = runtime.get(room.room, RoomRuntime(room.room))
             if was.frost or was.releasing:
                 # Protection has ended for a room that is switched off: put
                 # its unit back the way it is meant to be. Repeated until the
@@ -710,11 +775,25 @@ def plan(
                         ),
                     )
                 )
-                next_runtime.append(RoomRuntime(room.room, releasing=True))
+                next_runtime.append(
+                    RoomRuntime(room.room, releasing=True, open_since=opened)
+                )
+            elif opened is not None:
+                # Switched off and left alone, but its window clock must
+                # survive, or switching it back on would restart the grace.
+                next_runtime.append(RoomRuntime(room.room, open_since=opened))
+
+        window_note = f"standing aside, window open: {', '.join(aside)}" if aside else ""
 
         if not members:
             decisions.append(
-                GroupDecision(group, None, "off — every room in this group is switched off")
+                GroupDecision(
+                    group,
+                    None,
+                    f"off — no room in this group is taking part; {window_note}"
+                    if aside
+                    else "off — every room in this group is switched off",
+                )
             )
             continue
 
@@ -736,6 +815,8 @@ def plan(
         }
 
         decision = _decide_mode(group, list(demands.values()), limits, state, now, frost)
+        if window_note:
+            decision = replace(decision, because=f"{decision.because}; {window_note}")
         decisions.append(decision)
 
         for room in members:
@@ -751,6 +832,13 @@ def plan(
                 now,
                 frost.release if frost is not None else None,
             )
+            opened = opened_at[room.room]
+            if opened is not None and room.room not in standby:
+                if demand.frost:
+                    because += " (window open, heated anyway for frost protection)"
+                else:
+                    left = room.lockout_grace - (now - opened)
+                    because += f" (window open — standing aside in {_fmt_grace(left)})"
 
             commands.append(
                 RoomCommand(
@@ -800,6 +888,7 @@ def plan(
                     untrusted_since=None if trusted else (was.untrusted_since or now),
                     frost=demand.frost,
                     releasing=False,
+                    open_since=opened,
                 )
             )
 

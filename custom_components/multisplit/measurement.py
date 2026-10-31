@@ -61,6 +61,25 @@ def read_surplus(hass: HomeAssistant, config: SystemConfig) -> bool | None:
     return state.state == "on"
 
 
+def read_open_windows(hass: HomeAssistant, config: SystemConfig) -> frozenset[str]:
+    """Rooms whose window or door reads open right now.
+
+    Only a definite "on" counts. A sensor that is missing or unavailable --
+    the indoor unit rebooting, Home Assistant still starting -- leaves the
+    room taking part as normal: wrongly standing a room aside leaves it cold
+    with nothing to say why, while the device enforces its own lockout
+    locally whatever this reads.
+    """
+    open_now = set()
+    for room in config.rooms:
+        if room.lockout_sensor is None:
+            continue
+        state = hass.states.get(room.lockout_sensor)
+        if state is not None and state.state == "on":
+            open_now.add(room.key)
+    return frozenset(open_now)
+
+
 def _age(state, now: datetime):
     """Time since the integration last *reported*, not since the value changed.
 
@@ -146,6 +165,8 @@ def unavailable_entities(hass: HomeAssistant, config: SystemConfig) -> list[str]
         wanted.extend(room.temperature_sensors)
         if room.schedule_entity:
             wanted.append(room.schedule_entity)
+        if room.lockout_sensor:
+            wanted.append(room.lockout_sensor)
     return [entity_id for entity_id in wanted if hass.states.get(entity_id) is None]
 
 

@@ -20,6 +20,7 @@ SERVICE_RELOAD = "reload"
 SERVICE_EXPLAIN = "explain"
 SERVICE_SET_ROOM_TARGET = "set_room_target"
 SERVICE_CLEAR_OVERRIDE = "clear_override"
+SERVICE_RESUME_SCHEDULE = "resume_schedule"
 SERVICE_SET_SCHEDULE = "set_schedule"
 SERVICE_SET_AWAY = "set_away"
 

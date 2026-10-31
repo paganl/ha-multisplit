@@ -49,6 +49,7 @@ def record_for(
     surplus: bool = False,
     surplus_reading: bool | None = None,
     away: bool = False,
+    open_windows: frozenset[str] = frozenset(),
 ) -> dict:
     """One cycle, as a flat JSON-safe object.
 
@@ -57,7 +58,9 @@ def record_for(
     exactly. The commanded ``target`` alone cannot: it is already moved.
     ``surplus_reading`` is the sensor as read, before settling (None for
     unavailable or no sensor), so the settle time can be judged against how
-    the real signal behaves.
+    the real signal behaves. Each room's ``window`` is its lockout sensor as
+    read, and ``window_open`` whether that stood it aside, so a replay can
+    feed the same input and check the same outcome.
     """
     intents = intents or {}
     return {
@@ -96,6 +99,8 @@ def record_for(
                 ),
                 "intent_source": (i.source if (i := intents.get(command.room)) else None),
                 "frost": command.frost,
+                "window": command.room in open_windows,
+                "window_open": command.window_open,
             }
             for command in plan.rooms
         },
@@ -162,6 +167,13 @@ class Telemetry:
                 return True, f"{room} changed what it wants"
             if before.get("target") != now.get("target"):
                 return True, f"{room} target changed"
+            # Neither of these need move the mode or target -- an idle room
+            # standing aside changes neither -- and a replay needs to see the
+            # sensor flip when it happened to reproduce the grace.
+            if before.get("window") != now.get("window"):
+                return True, f"{room} window opened or closed"
+            if before.get("window_open") != now.get("window_open"):
+                return True, f"{room} stood aside or rejoined"
 
             was, is_now = before.get("measured"), now.get("measured")
             if (was is None) != (is_now is None):
@@ -281,7 +293,9 @@ def observed_overshoot(records: list[dict]) -> list[tuple[float, float]]:
 
     The moment a unit is stopped is the only one that says anything about the
     cut-off: that is the overshoot the controller actually permitted at that
-    outdoor temperature. Anything else is a room on its way somewhere.
+    outdoor temperature. Anything else is a room on its way somewhere -- and
+    so is a room stopped for an open window, which says nothing about where
+    the cut-off sits.
     """
     out: list[tuple[float, float]] = []
     for index in range(1, len(records)):
@@ -292,6 +306,8 @@ def observed_overshoot(records: list[dict]) -> list[tuple[float, float]]:
         for room, now in after.get("rooms", {}).items():
             was = before.get("rooms", {}).get(room)
             if not was:
+                continue
+            if now.get("window_open"):
                 continue
             if was.get("mode") and now.get("mode") is None and now.get("overshoot") is not None:
                 out.append((float(outdoor), float(now["overshoot"])))

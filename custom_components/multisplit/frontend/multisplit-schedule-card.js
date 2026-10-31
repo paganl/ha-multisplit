@@ -338,11 +338,34 @@ class MultisplitScheduleCard extends HTMLElement {
     this._render();
   }
 
-  async _toggleAway() {
-    const id = this._awaySwitch();
-    if (!id) return;
-    const on = this._hass.states[id].state === "on";
-    await this._hass.callService("switch", on ? "turn_off" : "turn_on", { entity_id: id });
+  /**
+   * Something set by hand that "Follow schedule" would clear. Not
+   * "away (room)" on its own: a room's presence schedule reading off produces
+   * that too, and there is nothing to clear for it.
+   */
+  _offSchedule(a) {
+    return a.target_source === "override" || !!a.room_away;
+  }
+
+  _resumeTitle(a, houseAway) {
+    if (this._offSchedule(a)) return "Drop the thermostat setting and room away; back to the schedule now";
+    if (houseAway) return "The whole house is away; turn the away switch off to resume";
+    if (a.target_source === "away (room)") return "Away because its presence schedule is off";
+    return "Already following its schedule";
+  }
+
+  async _resumeSchedule() {
+    if (this._resuming) return;
+    const a = this._attrs();
+    this._resuming = true;
+    try {
+      await this._hass.callService("multisplit", "resume_schedule", { room: a.room });
+      this._error = null;
+    } catch (err) {
+      this._error = (err && err.message) || String(err);
+    }
+    this._resuming = false;
+    this._render();
   }
 
   _openDayList(day, mark = null) {
@@ -654,12 +677,13 @@ class MultisplitScheduleCard extends HTMLElement {
           }</p>
         </div>
         ${
-          awayId
-            ? `<button class="away${away ? " on" : ""}" aria-pressed="${!!away}">${away ? "Away is on" : "Away"}</button>`
+          state
+            ? `<button class="resume" ${this._offSchedule(a) ? "" : "disabled"}
+                title="${this._resumeTitle(a, away)}">Follow schedule</button>`
             : ""
         }
       </div>
-      ${away ? `<p class="banner">Away is on. Every room holds ${fmt(a.away_target)}° until it is switched off; the schedule resumes then.</p>` : ""}
+      ${away ? `<p class="banner">The house is away. Every room holds ${fmt(a.away_target)}° until the away switch is turned off; the schedule resumes then.</p>` : ""}
       <div class="grid">
         <div class="row axis"><span></span><div class="hours">${hours}</div></div>
         ${rows}
@@ -704,7 +728,7 @@ class MultisplitScheduleCard extends HTMLElement {
         if (flag) this._onFlagKey(ev, day, Number(flag.dataset.index));
       });
     });
-    on(root, ".away", () => this._toggleAway());
+    on(root, ".resume", () => this._resumeSchedule());
     this._bindPanel();
     this._bindFooter();
   }
@@ -817,11 +841,11 @@ const STYLE = `<style>
   h2 { margin: 0; font-size: 1.35em; font-weight: 500; letter-spacing: -0.01em; }
   .status { margin: 4px 0 0; color: var(--primary-text-color); }
   .rails { margin: 2px 0 0; color: var(--secondary-text-color); font-size: 0.88em; }
-  .away {
+  .resume {
     font: inherit; font-size: 0.9em; padding: 8px 12px; border-radius: 8px; cursor: pointer; white-space: nowrap;
-    border: 1px solid var(--divider-color); background: none; color: var(--primary-text-color);
+    border: 1px solid var(--primary-color); background: none; color: var(--primary-color);
   }
-  .away.on { background: rgb(74, 111, 165); border-color: rgb(74, 111, 165); color: #fff; }
+  .resume:disabled { border-color: var(--divider-color); color: var(--secondary-text-color); cursor: default; opacity: 0.6; }
   .banner {
     margin: 12px 0 0; padding: 8px 12px; border-radius: 8px; font-size: 0.92em;
     background: color-mix(in srgb, rgb(74, 111, 165) 14%, transparent); color: var(--primary-text-color);

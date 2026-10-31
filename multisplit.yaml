@@ -167,18 +167,26 @@ groups:
 # shared room (`owner: [Paul, Anna]`) -- without one, only admins can; and
 # `min_target` / `max_target`, the range every target for the room must
 # sit in, schedule and thermostat alike -- without them, the group's
-# setpoint range.
+# setpoint range. Also optional: `lockout_sensor`, a binary sensor that is
+# on while a window or door in the room is open. While it is on the room
+# stands aside -- no vote, unit off, status "window open" -- and rejoins
+# when it closes. Point it at the indoor unit's own "Window lockout"
+# entity, which turns on only after the device's grace; for a raw contact
+# sensor add `lockout_grace` (minutes) so a door walked through changes
+# nothing.
 rooms:
   living_room:
     name: Living Room
     group: a
     climate_entity: climate.mitsubishi_ac_livingroom_mitsubishi_ac_livingroom_climate
     temperature_sensors: [sensor.average_living_room_temperature]
+    lockout_sensor: binary_sensor.mitsubishi_ac_livingroom_window_lockout
   ischa:
     name: Ischa's Bedroom
     group: a
     climate_entity: climate.mitsubishi_ac_ischa_mitsubishi_ac_ischa_climate
     temperature_sensors: []
+    lockout_sensor: binary_sensor.mitsubishi_ac_ischa_window_lockout
   bedroom:
     name: Bedroom
     group: b
@@ -189,6 +197,7 @@ rooms:
     group: b
     climate_entity: climate.mitsubishi_ac_erin_mitsubishi_ac_erin_climate
     temperature_sensors: []
+    lockout_sensor: binary_sensor.mitsubishi_ac_erin_window_lockout
   office:
     name: Office
     group: b

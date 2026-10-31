@@ -38,6 +38,7 @@ from .const import (
     PLATFORMS,
     SERVICE_CLEAR_OVERRIDE,
     SERVICE_EXPLAIN,
+    SERVICE_RESUME_SCHEDULE,
     SERVICE_RELOAD,
     SERVICE_SET_AWAY,
     SERVICE_SET_ROOM_TARGET,
@@ -272,11 +273,11 @@ def _async_check_entities_later(
         # early.
         described = describe_missing(missing, hass.states.async_entity_ids())
         _LOGGER.warning(
-            "multisplit: %d configured %s not exist, so %s will be treated as "
-            "having no reading: %s",
+            "multisplit: %d configured %s not exist; a room missing its "
+            "temperature has no reading, and one missing its window sensor is "
+            "treated as closed: %s",
             len(missing),
             "entity does" if len(missing) == 1 else "entities do",
-            "that room" if len(missing) == 1 else "those rooms",
             "; ".join(described),
         )
 
@@ -321,6 +322,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 SERVICE_EXPLAIN,
                 SERVICE_SET_ROOM_TARGET,
                 SERVICE_CLEAR_OVERRIDE,
+                SERVICE_RESUME_SCHEDULE,
                 SERVICE_SET_SCHEDULE,
                 SERVICE_SET_AWAY,
             ):
@@ -420,6 +422,10 @@ def _async_register_services(hass: HomeAssistant) -> None:
         room = call.data[ATTR_ROOM]
         await _resolve(hass, room).async_clear_override(room)
 
+    async def resume_schedule(call: ServiceCall) -> None:
+        room = call.data[ATTR_ROOM]
+        await _resolve(hass, room).async_resume_schedule(room)
+
     hass.services.async_register(DOMAIN, SERVICE_RELOAD, reload)
     hass.services.async_register(
         DOMAIN,
@@ -433,6 +439,9 @@ def _async_register_services(hass: HomeAssistant) -> None:
     )
     hass.services.async_register(
         DOMAIN, SERVICE_CLEAR_OVERRIDE, clear_override, schema=ROOM_SCHEMA
+    )
+    hass.services.async_register(
+        DOMAIN, SERVICE_RESUME_SCHEDULE, resume_schedule, schema=ROOM_SCHEMA
     )
     hass.services.async_register(
         DOMAIN, SERVICE_SET_SCHEDULE, set_schedule, schema=SET_SCHEDULE_SCHEMA

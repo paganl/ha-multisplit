@@ -16,7 +16,7 @@ them in Home Assistant; neither belongs in this repository.
 | --- | --- | --- |
 | `common/base.yaml` | board, framework, logger, OTA, Bluetooth proxy | `device_name`, `friendly_name` |
 | `common/cn105.yaml` | CN105 component (pinned), UART, climate entity, room temperature feed, restart button | `friendly_name`, `remote_temp_sensor`, `hp_rx_pin`, `hp_tx_pin`, `restart_button_name` |
-| `common/window_lockout.yaml` | switch off after the lockout sensor has been open for the grace period; refuse to turn on while open | `ac_lockout_sensor`, `ac_lockout_delay`, `room_label` |
+| `common/window_lockout.yaml` | switch off after the lockout sensor has been open for the grace period; refuse to turn on while open; publish that as **Window Lockout** | `ac_lockout_sensor`, `ac_lockout_delay`, `room_label` |
 | `common/diagnostics.yaml` | uptime, Wi-Fi, version, time | — |
 
 Nothing here may use `!secret`: ESPHome does not allow it in remote packages.
@@ -44,9 +44,11 @@ installing, or the old copy is used.
 Unit-specific extras (vanes, i-see, outside air, runtime hours) belong in the
 room file, added to the climate entity with `climate: - id: !extend hp`.
 
-## Not handled by the integration yet
+## Windows and the integration
 
-The window lockout lives on the device because the multisplit integration has
-no notion of an open window: it still counts that room's demand and keeps
-re-sending heat/cool while the device vetoes it. Moving the lockout into the
-integration would remove both.
+The device enforces the lockout itself, so a unit stays off with a window open
+even if Home Assistant is down. It also publishes **Window Lockout**
+(`binary_sensor.<device name>_window_lockout`), on once its grace has passed.
+Set that as the room's `lockout_sensor` in the integration's questionnaire and
+the planner stands the room aside too: no vote for its group's mode, no
+commands the device would refuse, and *window open* as its status.
