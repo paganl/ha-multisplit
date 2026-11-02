@@ -159,12 +159,12 @@ in Home Assistant, Configure → *Outdoor units and rooms* — as a Home Assista
 user name or id, or a list for a shared room:
 
 ```yaml
-- key: erin
+- key: jane
   # …
-  owner: Erin
+  owner: jane
 - key: bedroom
   # …
-  owner: [Paul, Anna]
+  owner: [Paul, Jane]
 ```
 
 **Guardrails.** Every mark must sit inside the room's `min_target` and
@@ -202,7 +202,7 @@ presence automation, a voice assistant or any thermostat card:
 ```yaml
 action: climate.set_preset_mode
 target:
-  entity_id: climate.erin
+  entity_id: climate.jane
 data:
   preset_mode: away
 ```
@@ -223,7 +223,7 @@ backups. The `multisplit.set_schedule` service does the same as the card:
 ```yaml
 action: multisplit.set_schedule
 data:
-  room: erin
+  room: jane
   days: [mon, tue, wed, thu, fri]
   marks:
     - { at: "06:30", temperature: 19.5 }
