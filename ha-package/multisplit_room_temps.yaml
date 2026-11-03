@@ -1,0 +1,100 @@
+# Multi-split room temperatures from Evohome
+#
+# Room temperatures from the Evohome zones, for Erin, Ischa and the office.
+# The bedroom uses its BME680 directly and the living room
+# sensor.average_living_room_temperature, so neither is built here.
+# These feed two things:
+#   - the multisplit integration (temperature_sensors in multisplit.yaml)
+#   - each indoor unit's remote_temp_sensor (esphome/mitsubishi-ac-*.yaml)
+#
+# Why trigger-based: a plain template only writes when the value changes, so
+# a room holding steady looked stale to the integration after 30 minutes and
+# it fell back to the unit's return-air reading. These rewrite every 5
+# minutes, and at once on a real change, so last_reported keeps moving.
+#
+# Why the availability check: a failed Evohome poll used to come through as
+# 0.0 (float(default=0)) and trigger frost protection. Now the sensor goes
+# unavailable instead, which the integration skips: also when Evohome itself
+# has not reported for 30 minutes, so a dead cloud connection still shows
+# as dead rather than as a frozen value.
+#
+# Install:
+#   1. config/packages/multisplit_room_temps.yaml
+#   2. configuration.yaml (once, if not already there):
+#        homeassistant:
+#          packages: !include_dir_named packages
+#   3. DELETE the old template sensors for these rooms from
+#      configuration.yaml / templates.yaml (same unique_ids; Home Assistant
+#      refuses a duplicate). The entity ids stay the same.
+#   4. Developer Tools -> YAML -> Check configuration, then reload
+#      Template entities.
+#
+# To add a room: add a line to `zones` and copy one sensor block.
+
+template:
+  - triggers:
+      - trigger: time_pattern
+        minutes: "/5"
+      - trigger: state
+        entity_id:
+          - climate.erin_s_bedroom
+          - climate.ischa_s_bedroom_temp_ischa_s_room
+          - climate.office_office
+        attribute: current_temperature
+      - trigger: homeassistant
+        event: start
+      - trigger: event
+        event_type: event_template_reloaded
+
+    variables:
+      max_age_s: 1800
+      zones:
+        erin: climate.erin_s_bedroom
+        ischa: climate.ischa_s_bedroom_temp_ischa_s_room
+        office: climate.office_office
+
+    sensor:
+      - unique_id: 03c6449d-e21f-464b-bb07-c64a3f0d6f7e
+        default_entity_id: sensor.erinbedroomtemp
+        name: Erin Bedroom Temperature
+        device_class: temperature
+        state_class: measurement
+        unit_of_measurement: °C
+        state: "{{ state_attr(zones.erin, 'current_temperature') }}"
+        availability: >
+          {% set z = states[zones.erin] %}
+          {{ z is not none
+             and z.attributes.current_temperature is number
+             and (now() - z.last_reported).total_seconds() < max_age_s }}
+        attributes:
+          source: "{{ zones.erin }}"
+
+      - unique_id: ed6b955d-1888-4247-9f73-63c8e3922205
+        default_entity_id: sensor.escha_current_temp
+        name: Ischa Current Temperature
+        device_class: temperature
+        state_class: measurement
+        unit_of_measurement: °C
+        state: "{{ state_attr(zones.ischa, 'current_temperature') }}"
+        availability: >
+          {% set z = states[zones.ischa] %}
+          {{ z is not none
+             and z.attributes.current_temperature is number
+             and (now() - z.last_reported).total_seconds() < max_age_s }}
+        attributes:
+          source: "{{ zones.ischa }}"
+
+      - unique_id: 30b27757-8b86-40ad-913e-a395cb8d54a8
+        default_entity_id: sensor.office_current_temp
+        name: Office Current Temperature
+        device_class: temperature
+        state_class: measurement
+        unit_of_measurement: °C
+        state: "{{ state_attr(zones.office, 'current_temperature') }}"
+        availability: >
+          {% set z = states[zones.office] %}
+          {{ z is not none
+             and z.attributes.current_temperature is number
+             and (now() - z.last_reported).total_seconds() < max_age_s }}
+        attributes:
+          source: "{{ zones.office }}"

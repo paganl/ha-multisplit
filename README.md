@@ -125,6 +125,71 @@ multisplit: defaults.intent.band is not set; using 0, the default since 0.2.0. A
 Set `apply_to_hardware` to true — through Configure, or in the questionnaire
 and regenerate. Until then nothing is written to any unit.
 
+### Room temperature sensors: use a trigger-based template
+
+A room's `temperature_sensors` must keep reporting while the temperature
+holds steady. A sensor that has not reported for `stale_after_minutes` (30)
+is treated as stale, and the room falls back to the indoor unit's
+return-air reading. That reading runs 3–5° warm while heating, so the room
+stops early.
+
+A plain template sensor that copies another entity's value, for example
+`{{ state_attr('climate.erin_s_bedroom', 'current_temperature') }}` from
+an Evohome zone, writes state **only when the value changes**. Its
+`last_reported` stops moving whenever the room holds steady. Field telemetry
+(1–3 Nov 2026): Ischa, Erin and the office were on return air 34–57% of the
+time, each fallback starting 30 min after the TRV value last changed. Erin
+stopped heating five times at 19.7–20.7° against a 21.5° cut-off. The source
+`climate.*` entity itself is rewritten on every poll; only the template loses
+that.
+
+Fix: make the template trigger-based, so it rewrites every few minutes:
+[`ha-package/multisplit_room_temps.yaml`](ha-package/multisplit_room_temps.yaml).
+Notes from setting it up:
+
+- **No `float(default=0)`.** A failed cloud poll then reads 0.0, which is
+  accepted and triggers frost-protection heating (seven times in two days).
+  Use an `availability` template instead, so the sensor goes unavailable and
+  the integration moves on to the next source.
+- **Check that the source is alive too.** A sensor that rewrites itself every
+  5 min would otherwise hide a dead source behind a frozen value. The package
+  marks the sensor unavailable once the zone's own `last_reported` is more
+  than 30 min old.
+- **Keep the old `unique_id`s and delete the old blocks in the same edit.**
+  The entity id is tied to the `unique_id`, so it stays the same. Two blocks
+  with one `unique_id` are a duplicate, and Home Assistant drops one. Do not
+  give the trigger block its own `unique_id`: it would be added to each
+  sensor's, creating new entities.
+- **Trigger on `event_template_reloaded` and `homeassistant` start** as
+  well as `time_pattern`, or the sensors sit at unknown until the first
+  5-minute mark after a reload.
+- **It has to be YAML** (`template:` in configuration.yaml or a package). A
+  template helper made in the UI cannot have triggers.
+- **Check it after loading.** In Developer Tools → Template:
+  ```
+  {% set s = states.sensor.erinbedroomtemp %}
+  {{ s.state }} | {{ ((now() - s.last_reported).total_seconds() / 60) | round(1) }} min
+  ```
+  The age must reset to under 5 min every 5 min. The first attempt here sat
+  at `unavailable` for 80 min without ever rewriting, and every room fell
+  back to return air.
+- `default_entity_id` is only used the first time a `unique_id` is seen;
+  after that the entity registry keeps the id it already has. A typo in an
+  entity id is skipped silently. The bedroom sat on return air from
+  31 Oct to 3 Nov because of one.
+
+A sensor that publishes on every update anyway (an ESPHome BME680, for
+example) needs none of this.
+
+**The indoor units have the same 30-minute problem.**
+`remote_temperature_timeout: 30min` in `esphome/common/cn105.yaml` drops the
+room temperature if no new value arrives in that time. Home Assistant only
+sends ESPHome a sensor value when it changes, so a rewritten but unchanged
+value does not count. When the room holds steady for 30 min, the unit
+switches back to its own return-air sensor. Seen on the office unit on
+3 Nov: the TRV last changed at 15:02:20 and the unit's reading switched at
+15:32:25. Not yet fixed; raising the timeout is the likely fix.
+
 ## Schedules and away
 
 Each room follows a weekly schedule set by the person whose room it is. Add
