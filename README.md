@@ -134,11 +134,11 @@ return-air reading. That reading runs 3–5° warm while heating, so the room
 stops early.
 
 A plain template sensor that copies another entity's value, for example
-`{{ state_attr('climate.erin_s_bedroom', 'current_temperature') }}` from
+`{{ state_attr('climate.jane_s_bedroom', 'current_temperature') }}` from
 an Evohome zone, writes state **only when the value changes**. Its
 `last_reported` stops moving whenever the room holds steady. Field telemetry
-(1–3 Nov 2026): Ischa, Erin and the office were on return air 34–57% of the
-time, each fallback starting 30 min after the TRV value last changed. Erin
+(1–3 Nov 2026): susan , jane and the office were on return air 34–57% of the
+time, each fallback starting 30 min after the TRV value last changed. jane
 stopped heating five times at 19.7–20.7° against a 21.5° cut-off. The source
 `climate.*` entity itself is rewritten on every poll; only the template loses
 that.
@@ -167,7 +167,7 @@ Notes from setting it up:
   template helper made in the UI cannot have triggers.
 - **Check it after loading.** In Developer Tools → Template:
   ```
-  {% set s = states.sensor.erinbedroomtemp %}
+  {% set s = states.sensor.janebedroomtemp %}
   {{ s.state }} | {{ ((now() - s.last_reported).total_seconds() / 60) | round(1) }} min
   ```
   The age must reset to under 5 min every 5 min. The first attempt here sat
@@ -198,7 +198,7 @@ install and no resource to add:
 
 ```yaml
 type: custom:multisplit-schedule-card
-# entities: [climate.erin_s_bedroom]   # optional; every room when left out
+# entities: [climate.jane_s_bedroom]   # optional; every room when left out
 ```
 
 It shows one line per day, Monday to Sunday. A mark on a line sets the room's
