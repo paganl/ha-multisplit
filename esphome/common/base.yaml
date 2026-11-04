@@ -18,8 +18,15 @@ esp32:
 logger:
   level: INFO
 
+# Every room file must set the OTA password, which cannot live here
+# (ESPHome does not allow !secret in a remote package):
+#   ota:
+#     - id: !extend ota_esphome
+#       password: !secret ota_password
+# Without it, anything that can reach the unit on the network can flash it.
 ota:
   - platform: esphome
+    id: ota_esphome
 
 captive_portal:
 

@@ -16,18 +16,23 @@ substitutions:
 packages:
   # Local: holds your Wi-Fi secrets.
   wifi: !include common/wifi.yaml
-  # Shared config, maintained in GitHub. Fetched fresh on every build:
-  # Clean Build Files does not clear the package cache, so a longer
-  # refresh would keep building from an old copy.
+  # Shared config, maintained in GitHub.
+  # Pinned to a release: only a tagged version reaches the units, so a
+  # push to main cannot change their firmware. Move it on when you
+  # upgrade. refresh: always so a new tag is fetched at once.
   shared:
     url: https://github.com/paganl/ha-multisplit
-    ref: main
+    ref: v0.7.1
     refresh: always
     files:
       - esphome/common/base.yaml
       - esphome/common/cn105.yaml
       - esphome/common/window_lockout.yaml
       - esphome/common/diagnostics.yaml
+
+ota:
+  - id: !extend ota_esphome
+    password: !secret ota_password
 
 api:
   encryption:

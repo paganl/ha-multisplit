@@ -10,7 +10,25 @@ can be maintained here rather than in the Device Builder, which does not show
 package files.
 
 The room files expect a local `common/wifi.yaml` and a `secrets.yaml` next to
-them in Home Assistant; neither belongs in this repository.
+them in Home Assistant; neither belongs in this repository. `secrets.yaml`
+needs, besides each unit's API key and fallback-AP password:
+
+```yaml
+ota_password: "a long random string"
+```
+
+Every room file sets it on the OTA component that `common/base.yaml` defines,
+because `!secret` cannot be used in a remote package:
+
+```yaml
+ota:
+  - id: !extend ota_esphome
+    password: !secret ota_password
+```
+
+Without a password, anything that can reach a unit on the network can flash
+new firmware to it. Adding one is a normal wireless install: a unit without a
+password accepts the upload that sets it.
 
 | File | What it holds | Needs these substitutions |
 | --- | --- | --- |
@@ -28,7 +46,7 @@ packages:
   wifi: !include common/wifi.yaml   # local: holds Wi-Fi secrets
   shared:
     url: https://github.com/paganl/ha-multisplit
-    ref: main
+    ref: v0.7.1          # a release tag, never main
     refresh: always
     files:
       - esphome/common/base.yaml
@@ -37,10 +55,15 @@ packages:
       - esphome/common/diagnostics.yaml
 ```
 
+**Pin `ref` to a release tag.** With `ref: main`, anyone who can push to this
+repository changes the units' firmware on their next install. With a tag, only
+a published release does, and you choose when to move on. To upgrade, change
+`ref` to the new tag in each room file and install.
+
 `refresh: always` makes every Validate and Install fetch the repository. Keep
 it: ESPHome caches remote packages in `.esphome/packages`, which **Clean Build
-Files** does not clear, so with a longer refresh a change pushed here is not
-seen until that interval has passed.
+Files** does not clear, so with a longer refresh a new `ref` is not seen until
+that interval has passed.
 
 Unit-specific extras (vanes, i-see, outside air, runtime hours) belong in the
 room file, added to the climate entity with `climate: - id: !extend hp`.

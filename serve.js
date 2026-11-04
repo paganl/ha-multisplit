@@ -13,7 +13,10 @@ http
     const rel = decodeURIComponent(req.url.split("?")[0]);
     const file = path.join(root, rel === "/" ? "harness.html" : rel);
 
-    if (!file.startsWith(root)) {
+    // path.relative, not startsWith: "/repo-other" starts with "/repo" too,
+    // so ../ha-multisplit-other/... used to get through.
+    const inside = path.relative(root, file);
+    if (inside.startsWith("..") || path.isAbsolute(inside)) {
       res.writeHead(403).end("no");
       return;
     }
@@ -30,4 +33,4 @@ http
       res.end(data);
     });
   })
-  .listen(8765, () => console.log("serving on http://localhost:8765"));
+  .listen(8765, "127.0.0.1", () => console.log("serving on http://localhost:8765 (this machine only)"));
