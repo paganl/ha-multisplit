@@ -528,6 +528,7 @@ up in the right mode at the wrong temperature cannot be expressed.
 - [BUILD-v3.md](BUILD-v3.md) — what gets built, in what order
 - [HARVEST.md](HARVEST.md) — the measured values, and what is still unanswered
 - [CHANGELOG.md](CHANGELOG.md) — what changed in each release, and why
+- [ROADMAP.md](ROADMAP.md) — what is planned, and the criteria for 1.0
 - [ARCHITECTURE.md](ARCHITECTURE.md) — review of the system this replaces
 
 ## Dashboard
