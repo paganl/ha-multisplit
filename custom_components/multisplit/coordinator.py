@@ -8,6 +8,7 @@ all of it in as arguments.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import datetime
 from pathlib import Path
@@ -92,6 +93,11 @@ class MultisplitCoordinator(DataUpdateCoordinator[Plan]):
         self._writing = False
         self._dropped = 0
 
+        # One cycle at a time. The reconciler awaits service calls, so a
+        # cycle started by a person's change could otherwise interleave with
+        # the tick or a sensor-driven one and command a unit twice.
+        self._cycle_lock = asyncio.Lock()
+
     # ------------------------------------------------------------------
     # Watching the inputs
     # ------------------------------------------------------------------
@@ -141,6 +147,23 @@ class MultisplitCoordinator(DataUpdateCoordinator[Plan]):
     # ------------------------------------------------------------------
 
     async def _async_update_data(self) -> Plan:
+        async with self._cycle_lock:
+            return await self._async_cycle()
+
+    async def async_apply_now(self) -> None:
+        """Re-plan at once, for a change a person has just made.
+
+        ``async_request_refresh`` is debounced: the first call runs, and any
+        other within Home Assistant's 10 second cooldown waits it out. Right
+        for sensors, which change in bursts; wrong for a schedule saved from
+        the card, where the thermostat then showed the old target for up to
+        10-15 s with nothing to say a change was pending. This runs the cycle
+        now and returns once the room entities show the result, so the
+        service call -- and the card's "Saving…" -- ends when it has applied.
+        """
+        await self.async_refresh()
+
+    async def _async_cycle(self) -> Plan:
         now = dt_util.utcnow()
 
         for room in comfort.expired(self.overrides, now):
@@ -338,7 +361,7 @@ class MultisplitCoordinator(DataUpdateCoordinator[Plan]):
         self.store.set_away(away)
         self.overrides.clear()
         _LOGGER.info("multisplit: away %s; manual overrides cleared", "on" if away else "off")
-        await self.async_request_refresh()
+        await self.async_apply_now()
 
     def room_away(self, room: str) -> bool:
         """Whether this room is set away on its own (the house may be too)."""
@@ -383,7 +406,7 @@ class MultisplitCoordinator(DataUpdateCoordinator[Plan]):
             "on" if away else "off",
             f" until {until.isoformat()}" if away and until else "",
         )
-        await self.async_request_refresh()
+        await self.async_apply_now()
 
     def next_change(self, room: str) -> datetime | None:
         """When this room's schedule next moves, in local time; None without one."""
@@ -432,7 +455,7 @@ class MultisplitCoordinator(DataUpdateCoordinator[Plan]):
             ", ".join(days),
             user.name if user else "Home Assistant",
         )
-        await self.async_request_refresh()
+        await self.async_apply_now()
 
     async def async_set_override(
         self, room: str, target: float, until: datetime | None
@@ -442,7 +465,7 @@ class MultisplitCoordinator(DataUpdateCoordinator[Plan]):
             name = next(r.name for r in self.config.rooms if r.key == room)
             raise ServiceValidationError(f"{name}: {problem}")
         self.overrides[room] = Override(target=target, expires_at=until)
-        await self.async_request_refresh()
+        await self.async_apply_now()
 
     async def async_set_from_thermostat(self, room: str, target: float) -> None:
         """A thermostat turned by hand holds until the schedule next moves."""
@@ -450,7 +473,7 @@ class MultisplitCoordinator(DataUpdateCoordinator[Plan]):
 
     async def async_clear_override(self, room: str) -> None:
         self.overrides.pop(room, None)
-        await self.async_request_refresh()
+        await self.async_apply_now()
 
     async def async_resume_schedule(self, room: str) -> None:
         """Back to the schedule now: no override, and not away on its own.
@@ -472,7 +495,7 @@ class MultisplitCoordinator(DataUpdateCoordinator[Plan]):
             )
             or "nothing to clear",
         )
-        await self.async_request_refresh()
+        await self.async_apply_now()
 
     def _unit_is_off(self, room: str) -> bool:
         """Whether a room's unit is seen off, or no longer exists at all.
@@ -504,11 +527,11 @@ class MultisplitCoordinator(DataUpdateCoordinator[Plan]):
     async def async_exclude(self, room: str) -> None:
         """Take a room out of control entirely, at its own request."""
         self.excluded.add(room)
-        await self.async_request_refresh()
+        await self.async_apply_now()
 
     async def async_include(self, room: str) -> None:
         self.excluded.discard(room)
-        await self.async_request_refresh()
+        await self.async_apply_now()
 
     def explain(self, room: str | None = None) -> dict:
         """Everything the system believes right now, for developer tools."""
