@@ -1,11 +1,11 @@
 {
   "domain": "multisplit",
   "name": "Multi-split climate control",
-  "codeowners": [
-    "@paganl"
-  ],
   "categories": [
     "climate.heat_pumps_air_conditioning"
+  ],
+  "codeowners": [
+    "@paganl"
   ],
   "config_flow": true,
   "dependencies": [
