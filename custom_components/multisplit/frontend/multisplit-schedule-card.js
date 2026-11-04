@@ -507,6 +507,7 @@ class MultisplitScheduleCard extends HTMLElement {
         level = i > 0 && m.minute - marks[i - 1].minute < near ? 1 - level : 0;
         return `<button class="flag${on ? " selected" : ""}${level ? " low" : ""}" data-index="${i}"
           style="left:${(m.minute / DAY) * 100}%"
+          title="${DAY_LONG[day]} ${hhmm(m.minute)} · ${fmt(m.temperature)}°"
           aria-label="${DAY_LONG[day]} ${hhmm(m.minute)}, ${fmt(m.temperature)} degrees">
           <span class="pin" style="background:${tempColour(m.temperature, lo, hi)}"></span>
           <span class="tag">${fmt(m.temperature)}°</span></button>`;
@@ -962,17 +963,27 @@ const STYLE = `<style>
   }
   .save:disabled { opacity: 0.45; cursor: default; }
   button:focus-visible, .time:focus-visible { outline: 2px solid var(--primary-color); outline-offset: 2px; }
-  /* Narrow: the lines become an overview. Labels would collide, so only the
-   * picked mark keeps one, and the day opens as a list to edit. */
+  /* Narrow card: tighter columns whatever the pointer. */
   @container (max-width: 480px) {
     .row { grid-template-columns: 38px 1fr; }
-    .track { height: 34px; }
-    .flag { height: 34px; }
-    .flag .pin, .flag.low .pin { height: 24px; }
-    .flag:not(.selected) .tag { display: none; }
-    .flag .tag, .flag.low .tag { top: 0; }
+    .flag .tag { font-size: 0.72em; padding: 0 4px; }
     .copy { flex-basis: 100%; }
     .mark { gap: 8px; }
+  }
+  /* Narrow card on a touch screen: the lines become an overview. Labels would
+   * collide under a finger, so only the picked mark keeps one, and the day
+   * opens as a list to edit. With a mouse the labels stay, even in a narrow
+   * desktop column -- there is a precise pointer, and hovering a pin names
+   * it -- which is what went wrong before: a desktop dashboard column is
+   * usually under 480px too, so Chrome got the phone layout. */
+  @container (max-width: 480px) {
+    @media (hover: none) {
+      .track { height: 34px; }
+      .flag { height: 34px; }
+      .flag .pin, .flag.low .pin { height: 24px; }
+      .flag:not(.selected) .tag { display: none; }
+      .flag .tag, .flag.low .tag { top: 0; }
+    }
   }
 </style>`;
 
