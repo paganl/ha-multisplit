@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.7.1 — 2026-11-04
+
+Security fixes. The indoor units need a reinstall; the integration needs no
+configuration change.
+
+**Security**
+
+- **OTA password on the indoor units.** `common/base.yaml` had no OTA
+  password, so anything that could reach a unit on the network could flash
+  it. The OTA component now has an id, `ota_esphome`, and every room file sets
+  `password: !secret ota_password` on it (`!secret` is not allowed in a remote
+  package). Add `ota_password` to ESPHome's `secrets.yaml`, copy the room files
+  across, and install each unit; a unit without a password accepts the upload
+  that sets it.
+- **Room files pin the shared packages to a release tag** (`ref: v0.7.1`)
+  instead of `main`, so a push to the repository cannot change the units'
+  firmware. Move `ref` on when you upgrade.
+- **`multisplit.reload` is admin-only.** It restarts the controller.
+- **`serve.js`** (the local development server) listens on 127.0.0.1 only, and
+  its path check uses `path.relative`: `startsWith` let
+  `../ha-multisplit-other/...` read files in sibling folders.
+
 ## 0.7.0 — 2026-11-04
 
 Changes made by hand now show up at once, the schedule card shows its

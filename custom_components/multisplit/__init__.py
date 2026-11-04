@@ -27,6 +27,7 @@ from homeassistant.exceptions import ConfigEntryNotReady, HomeAssistantError
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.event import async_call_later
+from homeassistant.helpers.service import async_register_admin_service
 from homeassistant.util import dt as dt_util
 
 from . import measurement
@@ -426,7 +427,8 @@ def _async_register_services(hass: HomeAssistant) -> None:
         room = call.data[ATTR_ROOM]
         await _resolve(hass, room).async_resume_schedule(room)
 
-    hass.services.async_register(DOMAIN, SERVICE_RELOAD, reload)
+    # Reloading restarts the controller, so it is an admin's call.
+    async_register_admin_service(hass, DOMAIN, SERVICE_RELOAD, reload)
     hass.services.async_register(
         DOMAIN,
         SERVICE_EXPLAIN,
