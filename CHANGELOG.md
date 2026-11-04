@@ -1,6 +1,10 @@
 # Changelog
 
-## Unreleased
+## 0.7.0 — 2026-11-04
+
+Changes made by hand now show up at once, the schedule card shows its
+temperatures in a desktop browser, and the repository passes HACS's
+validation: it has a license, a brand icon and a manifest category.
 
 **Changed**
 
@@ -21,6 +25,30 @@
   was narrower than 480 px, and a desktop dashboard column usually is. The
   overview layout now applies only on touch screens; with a mouse the labels
   stay at any width, and hovering a mark shows its day, time and temperature.
+
+**Added**
+
+- **MIT license** (`LICENSE`).
+- **A brand icon** in `custom_components/multisplit/brand/`, which HACS
+  requires.
+- **Manifest category** `climate.heat_pumps_air_conditioning`.
+- **README: room temperature sensors.** A room's sensor has to keep reporting
+  while the temperature holds steady, or after 30 minutes the room falls back
+  to the unit's return-air reading. A plain template sensor writes only on
+  change. The new section explains this and the pitfalls, and
+  `ha-package/multisplit_room_temps.yaml` is a trigger-based package for
+  Evohome zones.
+
+**Known issues**
+
+- The indoor units' `remote_temperature_timeout: 30min` drops the room
+  temperature when it holds steady for 30 minutes, because Home Assistant only
+  sends ESPHome a changed value; the unit then runs on its own return-air
+  sensor.
+- A configured entity that does not exist is skipped silently, and a 0.0°
+  reading is accepted (frost protection then heats).
+- A restart forgets a heating run in progress, and a Home Assistant restart can
+  briefly clear a unit's window lockout.
 
 ## 0.6.0 — 2026-10-31
 
