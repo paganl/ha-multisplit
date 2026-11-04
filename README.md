@@ -565,3 +565,7 @@ could not be: HACS treats a repository as one category, so a Lovelace card
 would need a repository of its own. If it is on your system it was copied to
 `config/www/` by hand. Remove the card from the dashboard, delete its entry
 under Settings → Dashboards → Resources, and delete the file.
+
+## License
+
+MIT. See [LICENSE](LICENSE).
