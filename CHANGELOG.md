@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+**Changed**
+
+- **Changes made by hand apply at once.** Saving a schedule, turning a room's
+  thermostat, away, **Follow schedule** and switching a room off or on now
+  re-plan immediately, instead of through Home Assistant's debounced refresh,
+  which held any second request within 10 seconds. A schedule saved from the
+  card used to take 10–15 s to reach the room's thermostat with nothing to say
+  it was pending; now the service call returns once the thermostat shows the
+  new target, so the card's *Saving…* lasts until the change has applied.
+  Sensor-driven re-planning is unchanged. Cycles are now serialised, so a
+  cycle started by a person cannot interleave with the tick.
+
 ## 0.6.0 — 2026-10-31
 
 The first full release since 0.4.0. Open windows now stand a room aside, the
