@@ -201,6 +201,8 @@ type: custom:multisplit-schedule-card
 # entities: [climate.jane_s_bedroom]   # optional; every room when left out
 ```
 
+<img src="docs/images/schedule-card.png" alt="The schedule card for the living room: a line per day, Monday to Sunday, with marks at 18°, 20°, 21.5° and 22°, coloured from slate for setbacks to amber for comfort" width="460">
+
 It shows one line per day, Monday to Sunday. A mark on a line sets the room's
 target from that time until the next mark, across midnight and round the week
 — a single mark on Monday at 07:00 means that temperature all week.
@@ -536,6 +538,8 @@ up in the right mode at the wrong temperature cannot be expressed.
 [dashboard.yaml](dashboard.yaml) is a complete view using built-in cards: a
 tile per room for control, a thermostat dial, a markdown card explaining every
 decision, and the outdoor units with their divergence counts.
+
+<img src="docs/images/room-thermostat.png" alt="A room's thermostat dial showing Heating, 21.5° target and 20° measured, with the home and away presets, and beneath it the decision in words: heating up, 20.0° now and aiming for 21.5°, running in home mode" width="460">
 
 The one option worth knowing about is `state_content` on the tiles:
 
