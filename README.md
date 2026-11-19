@@ -47,14 +47,24 @@ untrue — and a room that cannot have what it asked for should be able to say
 
 ## Installation
 
-### HACS
+### Marketplace (Home Assistant 2026.11 and later)
 
-Add this repository as a custom repository (HACS → ⋮ → Custom repositories),
-category **Integration**, then install and restart Home Assistant.
+[![Open this repository in your Home Assistant.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=paganl&repository=ha-multisplit&category=integration)
 
-**This requires the repository to be public.** HACS cannot install from a
-private repository, and its validation action refuses to run against one.
-While the repository is private, install manually.
+The button opens this repository in your own Home Assistant. Install it, then
+restart Home Assistant.
+
+It is not in the Marketplace catalog yet, so Home Assistant treats it as a
+custom repository: you are asked to sign in with GitHub and to accept a warning
+that the repository has not been reviewed. Without the button, open
+Settings → Marketplace → **Add from link** and enter
+`https://github.com/paganl/ha-multisplit`.
+
+### HACS (before 2026.11)
+
+Use the button above, or add this repository as a custom repository
+(HACS → ⋮ → Custom repositories), category **Integration**, then install and
+restart Home Assistant.
 
 ### Manually
 
